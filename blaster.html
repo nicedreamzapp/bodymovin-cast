@@ -1,0 +1,96 @@
+<!doctype html>
+<html>
+<head>
+<script src="_lg/polyfills.js"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Star Blaster · Body Movin'</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #02030a; overflow: hidden; cursor: none; }
+  canvas { display: block; position: fixed; top:0;right:0;bottom:0;left:0; width: 100vw; height: 100vh; }
+  #hud { z-index: 2; }
+</style>
+
+<script src="body.js"></script>
+<script src="howto.js"></script>
+<script src="scores.js"></script>
+<script>(function() {
+  const BP = window.BodyMovin;
+  const T = "max(1.6vmin,8px)", L = "max(1.6vmin,8px)", BH = "max(38px,5.8vmin)", HW = "max(104px,14vmin)", MW = "max(96px,13vmin)", GP = "max(6px,1vmin)";
+  const glass = "top:".concat(T, ";height:").concat(BH, ";min-height:0;box-sizing:border-box;border-radius:999px;border:1px solid rgba(255,255,255,.18);") + 'background:rgba(10,12,24,.55);color:#fff;opacity:1;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);font:800 max(14px,2vmin)/1 -apple-system,system-ui,"Segoe UI",sans-serif;letter-spacing:.06em;padding:0;margin:0';
+  BP.menuBtnStyle = "".concat(glass, ";left:calc(").concat(L, " + ").concat(HW, " + ").concat(GP, ");width:").concat(MW);
+  BP.musicBtnStyle = "".concat(glass, ";left:calc(").concat(L, " + ").concat(HW, " + ").concat(MW, " + ").concat(GP, " * 2);width:").concat(BH, ";min-width:0");
+  BP.uiRow = () => {
+    const vm = Math.min(innerWidth, innerHeight) / 100, t = Math.max(1.6 * vm, 8), h = Math.max(38, 5.8 * vm);
+    return { bottom: t + h, right: Math.max(1.6 * vm, 8) + Math.max(104, 14 * vm) + Math.max(96, 13 * vm) + h + 2 * Math.max(6, vm) };
+  };
+  BP.uiBelow = (x) => {
+    const r = BP.uiRow(), g = Math.max(8, Math.min(innerWidth, innerHeight) * 0.015);
+    return x >= r.right + g ? 0 : x >= innerWidth * 0.3 ? r.bottom + g : Math.max(r.bottom + g, innerHeight * 0.16);
+  };
+  BP.uiCover = null;
+  const hit = (a, b) => a && b && a.x < b.left + b.width && a.x + a.w > b.left && a.y < b.top + b.height && a.y + a.h > b.top;
+  (function camLoop() {
+    requestAnimationFrame(camLoop);
+    const cam = document.getElementById("bp-cam");
+    if (!cam) return;
+    const card = document.querySelector(".bph-wrap:not(.bph-gone) .bph-card"), cr = card && card.getBoundingClientRect();
+    const r = cam.getBoundingClientRect(), cover = cr && cr.width && hit({ x: cr.left, y: cr.top, w: cr.width, h: cr.height }, r) || hit(BP.uiCover, r);
+    cam.style.visibility = cover ? "hidden" : "";
+  })();
+  BP.uiHowTo = (cfg) => {
+    const place = () => {
+      const top = Math.max(BP.uiRow().bottom + 10, innerHeight * 0.16) / innerHeight;
+      BP.howTo(Object.assign({}, cfg, { top, bottom: typeof cfg.bottom === "function" ? cfg.bottom() : cfg.bottom }));
+    };
+    place();
+    addEventListener("resize", () => {
+      if (BP.howTo.visible) place();
+    });
+  };
+  const mk = () => {
+    if (document.getElementById("bp-home")) return;
+    const b = document.createElement("button");
+    b.id = "bp-home";
+    b.textContent = "← HOME";
+    b.setAttribute("aria-label", "back to Body Movin' home");
+    b.style.cssText = "position:fixed;z-index:30;".concat(glass, ";left:").concat(L, ";width:").concat(HW, ";cursor:pointer;overflow:hidden");
+    const go = () => {
+      location.href = "index.html";
+    };
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      go();
+    });
+    document.body.appendChild(b);
+    BP.uiHome = b;
+    (function loop(now) {
+      requestAnimationFrame(loop);
+      if (!BP.handOver || !BP.dwell || b.style.display === "none") return;
+      const r = b.getBoundingClientRect(), over = BP.handOver({ x: r.left, y: r.top, w: r.width, h: r.height }, innerWidth, innerHeight);
+      const k = BP.dwell("bp-home", over, now, 1200);
+      b.style.boxShadow = over ? "inset " + Math.round((k || 0) * r.width) + "px 0 0 #66e0ff55" : "none";
+      if (k === 1) go();
+    })(performance.now());
+  };
+  document.readyState === "loading" ? addEventListener("DOMContentLoaded", mk) : setTimeout(mk, 0);
+})();
+</script>
+<script>BodyMovin.uiHowTo({
+  title: "STAR BLASTER",
+  corner: false,
+  bottom: 0.7,
+  moves: [{ anim: "point", text: "Point a hand at a blue rock to shoot" }, { anim: "lean", text: "Step or lean to dodge the red ones" }],
+  you: "Each hand has its own gun"
+});
+</script>
+<script>BodyMovin.selfView = null;
+</script>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<canvas id="hud"></canvas>
+<script type="module" src="_lg/blaster-0.js"></script>
+</body>
+</html>

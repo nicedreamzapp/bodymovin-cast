@@ -1,0 +1,349 @@
+<!doctype html>
+<html>
+<head>
+<script src="_lg/polyfills.js"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Sky Runner · Body Movin'</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0b0830; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
+  canvas { display: block; position: fixed; top:0;right:0;bottom:0;left:0; width: 100vw; height: 100vh; }
+  #c { z-index: 2; }
+  #loading { position: fixed; top:0;right:0;bottom:0;left:0; z-index: 5; display: flex; flex-direction: column; gap: 16px; align-items: center; justify-content: center; color: #fff4e8; background: #1a1428;
+             font: 800 34px -apple-system, system-ui, sans-serif; letter-spacing: .14em; transition: opacity .6s; }
+  #loading small { font-weight: 500; font-size: 15px; letter-spacing: .3em; color: #d8c4b0; }
+</style>
+
+</head>
+<body>
+<canvas id="gl"></canvas><canvas id="c"></canvas>
+<div id="loading">SKY RUNNER<small>BUILDING THE BRIDGE…</small></div>
+<script src="body.js"></script>
+<script>BodyMovin.pauseHide = "#c";
+</script>
+<script>BodyMovin.needs = "full";
+</script>
+<script>BodyMovin.selfView = null;
+</script>
+<script src="howto.js"></script>
+<script src="scores.js"></script>
+<script>function RunStep(opt) {
+  opt = Object.assign({ hopMin: 0.28, armsJump: true, arms: true }, opt || {});
+  const on = {}, emit = (n, d) => (on[n] || []).forEach((f) => f(d));
+  const med = (a) => {
+    const s = a.slice().sort((x, y) => x - y), n = s.length;
+    return n ? n % 2 ? s[n >> 1] : (s[n / 2 - 1] + s[n / 2]) / 2 : 0;
+  };
+  const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
+  const chan = (name, th, k = 1, minP2P = 0) => ({ name, th, k, minP2P, side: 0, at: -9, ev: [], live: false, cad: 0, gap: 0, base: [] });
+  const CH = { legs: chan("legs", 0.03), feet: chan("feet", 0.03), arms: chan("arms", 0.1, 0.85, 0.5), bounce: chan("bounce", 0.04) };
+  const S = {
+    running: 0,
+    cadence: 0,
+    steps: 0,
+    src: "",
+    amp: 0,
+    lastStepAt: -9,
+    lastFrameAt: -9,
+    T: 0,
+    ch: CH,
+    jumps: 0,
+    hopUp: 0,
+    on(n, f) {
+      (on[n] || (on[n] = [])).push(f);
+      return S;
+    },
+    fresh(t) {
+      return t - S.lastFrameAt < 0.7;
+    },
+    // picture frames are arriving: use this, not the engine's legs
+    feed,
+    tick
+  };
+  let Ts = 0, Tbuf = [], Bbuf = [], B = { dir: 0, lo: 0, hi: 0 }, win = { legs: [], bounce: [], arms: [] }, last = -9;
+  const PJ = { prev: null, on: false, fired: false, at: 0, h: [], bad: 0 }, AU = { n: 0, armed: true, h: [] };
+  const resetChannels = () => {
+    for (const c of Object.values(CH)) {
+      c.side = 0;
+      c.ev = [];
+      c.live = false;
+      c.base = [];
+    }
+    B.dir = 0;
+    Bbuf = [];
+  };
+  function hit(c, t) {
+    const lastEv = c.ev[c.ev.length - 1];
+    if (lastEv !== void 0 && t - lastEv < 0.15) return;
+    if (lastEv !== void 0 && t - lastEv > 1) c.ev = [];
+    c.ev.push(t);
+    if (c.ev.length > 4) c.ev.shift();
+    if (c.ev.length < 3) return;
+    const gaps = c.ev.slice(1).map((x, i) => x - c.ev[i]);
+    c.gap = gaps[gaps.length - 1];
+    c.cad = Math.min(260, 60 / med(gaps.slice(-3)));
+    c.live = true;
+    fuse(t);
+    const minGap = Math.max(0.12, 0.6 * 60 / Math.max(60, S.cadence || c.cad));
+    if (t - S.lastStepAt >= minGap) {
+      S.lastStepAt = t;
+      S.steps++;
+      S.src = c.name;
+      emit("step", { cadence: S.cadence, src: c.name, amp: S.amp });
+    }
+  }
+  function fuse(t) {
+    let cad = 0, src = S.src;
+    for (const c of Object.values(CH)) {
+      if (c.live && t - c.ev[c.ev.length - 1] > Math.min(0.9, 1.5 * c.gap)) c.live = false;
+      if (c.live && c.cad * c.k > cad) {
+        cad = c.cad * c.k;
+        src = c.name;
+      }
+    }
+    const p2p = (a) => {
+      while (a.length && t - a[0][0] > 0.7) a.shift();
+      let lo = 1e9, hi = -1e9;
+      for (const x of a) {
+        lo = Math.min(lo, x[1]);
+        hi = Math.max(hi, x[1]);
+      }
+      return a.length > 1 ? hi - lo : 0;
+    };
+    S.amp = clamp(Math.max(p2p(win.legs) / 0.6, p2p(win.bounce) / 0.25, p2p(win.arms) / 1));
+    S.cadence = cad ? S.cadence ? S.cadence + (cad - S.cadence) * 0.6 : cad : 0;
+    if (cad) S.src = src;
+    S.running = cad ? clamp((S.cadence - 70) / 150) * (0.75 + 0.25 * S.amp) : 0;
+  }
+  function tick(t) {
+    fuse(t);
+  }
+  let lastJump = -9;
+  function jumped(t, src) {
+    if (t - lastJump < 0.9) return;
+    lastJump = t;
+    S.jumps++;
+    emit("jump", { src });
+  }
+  function feed(t, I, vis) {
+    if (!I) return;
+    const v = (k) => vis && vis[k] !== void 0 ? vis[k] : 1;
+    const inside = (k) => I[k] && I[k][0] > 5e-3 && I[k][0] < 0.995 && I[k][1] > 5e-3 && I[k][1] < 0.995;
+    const ok = (k) => inside(k) && v(k) >= 0.45;
+    if (!ok("lShoulder") || !ok("rShoulder") || !ok("lHip") || !ok("rHip")) {
+      PJ.prev = null;
+      PJ.on = false;
+      return;
+    }
+    const sy = (I.lShoulder[1] + I.rShoulder[1]) / 2, hy = (I.lHip[1] + I.rHip[1]) / 2, T = hy - sy;
+    Tbuf.push([t, T]);
+    while (Tbuf.length > 1 && t - Tbuf[0][0] > 1) Tbuf.shift();
+    const Tm = med(Tbuf.map((x) => x[1]));
+    if (T < 0.02 || Math.abs(T / Tm - 1) > 0.25) return;
+    if (t - last > 0.5) resetChannels();
+    const dt = Math.min(0.2, Math.max(5e-3, t - last));
+    last = t;
+    S.lastFrameAt = t;
+    Ts = Ts ? Ts + (T - Ts) * Math.min(1, dt / 1) : T;
+    S.T = Ts;
+    const pair = (c, a, b, w, extra = true) => {
+      if (!ok(a) || !ok(b) || !extra) return;
+      const raw = (I[a][1] - I[b][1]) / Ts;
+      c.base.push([t, raw]);
+      while (c.base.length > 1 && t - c.base[0][0] > 1.2) c.base.shift();
+      const d = raw - c.base.reduce((s, x) => s + x[1], 0) / c.base.length;
+      if (w) w.push([t, d]);
+      if (c.minP2P) {
+        let lo = 1e9, hi = -1e9;
+        for (const x of c.base) {
+          lo = Math.min(lo, x[1]);
+          hi = Math.max(hi, x[1]);
+        }
+        if (hi - lo < c.minP2P) return;
+      }
+      if (d > c.th && c.side !== 1) {
+        if (c.side && t - c.at < 0.5) hit(c, t);
+        c.side = 1;
+      } else if (d < -c.th && c.side !== -1) {
+        if (c.side && t - c.at < 0.5) hit(c, t);
+        c.side = -1;
+      }
+      if (Math.abs(d) > c.th) c.at = t;
+    };
+    pair(CH.legs, "lKnee", "rKnee", win.legs);
+    pair(CH.feet, "lFoot", "rFoot", null);
+    const swing = ok("lHand") && ok("rHand") && Math.min(I.lHand[1], I.rHand[1]) > sy - 0.6 * Ts && Math.max(I.lHand[1], I.rHand[1]) > sy;
+    if (opt.arms) pair(CH.arms, "lHand", "rHand", swing ? win.arms : null, swing);
+    const by = (sy + hy) / 2 / Ts;
+    Bbuf.push([t, by]);
+    while (Bbuf.length > 1 && t - Bbuf[0][0] > 0.6) Bbuf.shift();
+    const hp = by - Bbuf.reduce((s, x) => s + x[1], 0) / Bbuf.length;
+    win.bounce.push([t, hp]);
+    if (B.dir === 0) {
+      B.dir = 1;
+      B.hi = B.lo = hp;
+      B.hiAt = B.loAt = t;
+    } else if (B.dir < 0) {
+      if (hp < B.lo) {
+        B.lo = hp;
+        B.loAt = t;
+      } else if (hp > B.lo + 0.012) {
+        if (B.hi - B.lo >= CH.bounce.th && B.loAt - B.hiAt < 0.5) hit(CH.bounce, t);
+        B.dir = 1;
+        B.hi = hp;
+        B.hiAt = t;
+      }
+    } else {
+      if (hp > B.hi) {
+        B.hi = hp;
+        B.hiAt = t;
+      } else if (hp < B.hi - 0.012) {
+        B.dir = -1;
+        B.lo = hp;
+        B.loAt = t;
+      }
+    }
+    fuse(t);
+    hop(t, I, v, sy, hy, T);
+    if (opt.armsJump) armsUp(t, I, ok, sy, Ts);
+  }
+  function hop(t, I, v, sy, hy, T) {
+    const sure = ["lShoulder", "rShoulder", "lHip", "rHip"].every((k) => v(k) > 0.6 && I[k][1] > 0.01 && I[k][1] < 0.99 && I[k][0] > 0.01 && I[k][0] < 0.99);
+    if (!sure) {
+      PJ.prev = null;
+      PJ.on = false;
+      return;
+    }
+    const feet = I.lFoot && I.rFoot && I.lFoot[1] < 0.985 && I.rFoot[1] < 0.985 && v("lFoot") > 0.4 && v("rFoot") > 0.4;
+    const fy = feet ? Math.max(I.lFoot[1], I.rFoot[1]) : null;
+    if (!PJ.prev || t - PJ.prev[0] > 0.4) {
+      Object.assign(PJ, { hb: hy, fb: fy, Tb: T, prev: [t, hy, sy], h: [[t, hy, sy]], on: false });
+      return;
+    }
+    PJ.prev = [t, hy, sy];
+    PJ.h.push(PJ.prev);
+    while (PJ.h.length > 2 && t - PJ.h[1][0] >= 0.1) PJ.h.shift();
+    const h0 = PJ.h[0], d = Math.max(0.02, t - h0[0]), vh = (hy - h0[1]) / d / PJ.Tb, vs = (sy - h0[2]) / d / PJ.Tb;
+    const sane = T > 0.75 * PJ.Tb && T < 1.3 * PJ.Tb;
+    PJ.bad = sane ? 0 : PJ.bad + 1;
+    if (PJ.bad > 8) {
+      Object.assign(PJ, { Tb: T, hb: hy, fb: fy, bad: 0, on: false });
+      return;
+    }
+    const up = (PJ.hb - hy) / PJ.Tb, fup = feet && PJ.fb !== null ? (PJ.fb - fy) / PJ.Tb : null;
+    S.hopUp = up;
+    if (!PJ.on) {
+      const feetOk = fup === null ? up > 0.18 : fup > 0.05 && Math.abs(fup - up) < 0.45 || up > 0.18 && fup > -0.05;
+      if (sane && up > 0.12 && up < 0.9 && vh < -0.9 && vs < -0.55 && feetOk) {
+        PJ.on = true;
+        PJ.at = t;
+        PJ.fired = false;
+      } else {
+        PJ.hb += (hy - PJ.hb) * (Math.abs(vh) < 0.6 ? 0.04 : 5e-3);
+        if (sane) PJ.Tb += (T - PJ.Tb) * 0.03;
+        if (feet) PJ.fb = PJ.fb === null ? fy : PJ.fb + (fy - PJ.fb) * (fy > PJ.fb ? 0.3 : 0.02);
+      }
+    } else if (up < 0.06 || t - PJ.at > 0.9) PJ.on = false;
+    if (PJ.on && !PJ.fired && up >= opt.hopMin) {
+      PJ.fired = true;
+      jumped(t, "hop");
+    }
+  }
+  function armsUp(t, I, ok, sy, T) {
+    if (!ok("lHand") || !ok("rHand")) {
+      AU.n = 0;
+      return;
+    }
+    const hy = (I.lHand[1] + I.rHand[1]) / 2, top = I.head && ok("head") ? Math.min(I.head[1], sy - 0.35 * T) : sy - 0.6 * T;
+    AU.h.push([t, hy]);
+    while (AU.h.length > 2 && t - AU.h[0][0] > 0.3) AU.h.shift();
+    const rise = AU.h.reduce((m, x) => Math.max(m, (x[1] - hy) / Math.max(0.03, t - x[0]) / T), 0);
+    if (AU.recent === void 0 || rise >= 1.5) AU.recent = rise >= 1.5 ? t : -9;
+    const above = I.lHand[1] < top && I.rHand[1] < top;
+    AU.n = above ? AU.n + 1 : 0;
+    if (I.lHand[1] > sy && I.rHand[1] > sy) AU.armed = true;
+    if (AU.armed && AU.n >= 2 && t - AU.recent < 0.4) {
+      AU.armed = false;
+      jumped(t, "arms");
+    }
+  }
+  return S;
+}
+</script>
+<script>(function() {
+  const BP = window.BodyMovin;
+  const T = "max(1.6vmin,8px)", L = "max(1.6vmin,8px)", BH = "max(38px,5.8vmin)", HW = "max(104px,14vmin)", MW = "max(96px,13vmin)", GP = "max(6px,1vmin)";
+  const glass = "top:".concat(T, ";height:").concat(BH, ";min-height:0;box-sizing:border-box;border-radius:999px;border:1px solid rgba(255,255,255,.18);") + 'background:rgba(10,12,24,.55);color:#fff;opacity:1;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);font:800 max(14px,2vmin)/1 -apple-system,system-ui,"Segoe UI",sans-serif;letter-spacing:.06em;padding:0;margin:0';
+  BP.menuBtnStyle = "".concat(glass, ";left:calc(").concat(L, " + ").concat(HW, " + ").concat(GP, ");width:").concat(MW);
+  BP.musicBtnStyle = "".concat(glass, ";left:calc(").concat(L, " + ").concat(HW, " + ").concat(MW, " + ").concat(GP, " * 2);width:").concat(BH, ";min-width:0");
+  BP.uiRow = () => {
+    const vm = Math.min(innerWidth, innerHeight) / 100, t = Math.max(1.6 * vm, 8), h = Math.max(38, 5.8 * vm);
+    return { bottom: t + h, right: Math.max(1.6 * vm, 8) + Math.max(104, 14 * vm) + Math.max(96, 13 * vm) + h + 2 * Math.max(6, vm) };
+  };
+  BP.uiBelow = (x) => {
+    const r = BP.uiRow(), g = Math.max(8, Math.min(innerWidth, innerHeight) * 0.015);
+    return x >= r.right + g ? 0 : x >= innerWidth * 0.3 ? r.bottom + g : Math.max(r.bottom + g, innerHeight * 0.16);
+  };
+  BP.uiCover = null;
+  const hit = (a, b) => a && b && a.x < b.left + b.width && a.x + a.w > b.left && a.y < b.top + b.height && a.y + a.h > b.top;
+  (function camLoop() {
+    requestAnimationFrame(camLoop);
+    const cam = document.getElementById("bp-cam");
+    if (!cam) return;
+    const card = document.querySelector(".bph-wrap:not(.bph-gone) .bph-card"), cr = card && card.getBoundingClientRect();
+    const r = cam.getBoundingClientRect(), cover = cr && cr.width && hit({ x: cr.left, y: cr.top, w: cr.width, h: cr.height }, r) || hit(BP.uiCover, r);
+    cam.style.visibility = cover ? "hidden" : "";
+  })();
+  BP.uiHowTo = (cfg) => {
+    const place = () => {
+      const top = Math.max(BP.uiRow().bottom + 10, innerHeight * 0.16) / innerHeight;
+      BP.howTo(Object.assign({}, cfg, { top, bottom: typeof cfg.bottom === "function" ? cfg.bottom() : cfg.bottom }));
+    };
+    place();
+    addEventListener("resize", () => {
+      if (BP.howTo.visible) place();
+    });
+  };
+  const mk = () => {
+    if (document.getElementById("bp-home")) return;
+    const b = document.createElement("button");
+    b.id = "bp-home";
+    b.textContent = "← HOME";
+    b.setAttribute("aria-label", "back to Body Movin' home");
+    b.style.cssText = "position:fixed;z-index:30;".concat(glass, ";left:").concat(L, ";width:").concat(HW, ";cursor:pointer;overflow:hidden");
+    const go = () => {
+      location.href = "index.html";
+    };
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      go();
+    });
+    document.body.appendChild(b);
+    BP.uiHome = b;
+    (function loop(now) {
+      requestAnimationFrame(loop);
+      if (!BP.handOver || !BP.dwell || b.style.display === "none") return;
+      const r = b.getBoundingClientRect(), over = BP.handOver({ x: r.left, y: r.top, w: r.width, h: r.height }, innerWidth, innerHeight);
+      const k = BP.dwell("bp-home", over, now, 1200);
+      b.style.boxShadow = over ? "inset " + Math.round((k || 0) * r.width) + "px 0 0 #66e0ff55" : "none";
+      if (k === 1) go();
+    })(performance.now());
+  };
+  document.readyState === "loading" ? addEventListener("DOMContentLoaded", mk) : setTimeout(mk, 0);
+})();
+</script>
+<script>BodyMovin.uiHowTo({
+  title: "SKY RUNNER",
+  corner: "br",
+  bottom: 0.7,
+  side: "left",
+  width: 0.4,
+  // wide screens: a column beside the runner (10/23)
+  moves: [{ anim: "jog", text: "Jog in place to run" }, { anim: "jump", text: "Jump over low bars and gaps" }, { anim: "squat", text: "Squat under high bars" }],
+  you: "The runner on the bridge is you"
+});
+</script>
+<script type="module" src="_lg/runner-0.js"></script>
+</body>
+</html>

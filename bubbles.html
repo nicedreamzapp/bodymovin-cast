@@ -1,0 +1,40 @@
+<!doctype html>
+<html>
+<head>
+<script src="_lg/polyfills.js"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Bubble Pop · Body Movin'</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #26331c; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
+  canvas { display: block; position: fixed; top:0;right:0;bottom:0;left:0; width: 100vw; height: 100vh; }
+  #hud { z-index: 2; }
+</style>
+
+</head>
+<body>
+<canvas id="c"></canvas>
+<canvas id="hud"></canvas>
+<script src="body.js"></script>
+<script>BodyMovin.realSelf = { view: "behind", outfit: "casual", ghost: "ready" };
+</script>
+<script>BodyMovin.figure = { torso: 0.42, chestY: 0.4, drawReach: true, alpha: 0.3, limb: 1.35, armGain: 1.35, frameReach: false };
+</script>
+<script src="howto.js"></script>
+<script src="scores.js"></script>
+<script>BodyMovin.howTo({
+  title: "BUBBLE POP",
+  corner: false,
+  top: 0.03,
+  bottom: 0.74,
+  // 10/23: no corner reminder, no footnote
+  moves: [
+    { anim: "reach", text: "Touch a bubble gently" },
+    { anim: "point", text: "Same color in a row = combo" },
+    { anim: "hug", text: "Hug the giant bubble with both arms" }
+  ]
+});
+</script>
+<script type="module" src="_lg/bubbles-0.js"></script>
+</body>
+</html>

@@ -1,0 +1,351 @@
+{
+  "asset": {
+    "generator": "glTF-Transform v4.5.1",
+    "version": "2.0"
+  },
+  "accessors": [
+    {
+      "type": "SCALAR",
+      "componentType": 5123,
+      "count": 3711,
+      "bufferView": 0,
+      "byteOffset": 0
+    },
+    {
+      "type": "SCALAR",
+      "componentType": 5123,
+      "count": 1038,
+      "bufferView": 0,
+      "byteOffset": 7424
+    },
+    {
+      "type": "SCALAR",
+      "componentType": 5123,
+      "count": 5799,
+      "bufferView": 0,
+      "byteOffset": 9500
+    },
+    {
+      "type": "SCALAR",
+      "componentType": 5123,
+      "count": 5616,
+      "bufferView": 0,
+      "byteOffset": 21100
+    },
+    {
+      "type": "VEC3",
+      "componentType": 5126,
+      "count": 747,
+      "max": [
+        0.0730348601937294,
+        0.15447069704532623,
+        0.0733804777264595
+      ],
+      "min": [
+        -0.07429894804954529,
+        0.13273943960666656,
+        -0.07550132274627686
+      ],
+      "bufferView": 1,
+      "byteOffset": 0
+    },
+    {
+      "type": "VEC3",
+      "componentType": 5126,
+      "count": 747,
+      "bufferView": 1,
+      "byteOffset": 12
+    },
+    {
+      "type": "VEC2",
+      "componentType": 5126,
+      "count": 747,
+      "bufferView": 1,
+      "byteOffset": 24
+    },
+    {
+      "type": "VEC3",
+      "componentType": 5126,
+      "count": 273,
+      "max": [
+        0.07718369364738464,
+        0.15339542925357819,
+        0.07728147506713867
+      ],
+      "min": [
+        -0.07887636125087738,
+        0.13423533737659454,
+        -0.07863402366638184
+      ],
+      "bufferView": 2,
+      "byteOffset": 0
+    },
+    {
+      "type": "VEC3",
+      "componentType": 5126,
+      "count": 273,
+      "bufferView": 2,
+      "byteOffset": 12
+    },
+    {
+      "type": "VEC2",
+      "componentType": 5126,
+      "count": 273,
+      "bufferView": 2,
+      "byteOffset": 24
+    },
+    {
+      "type": "VEC3",
+      "componentType": 5126,
+      "count": 1428,
+      "max": [
+        0.08367684483528137,
+        0.26758068799972534,
+        0.10055093467235565
+      ],
+      "min": [
+        -0.061825867742300034,
+        0.13549184799194336,
+        -0.07231908291578293
+      ],
+      "bufferView": 3,
+      "byteOffset": 0
+    },
+    {
+      "type": "VEC3",
+      "componentType": 5126,
+      "count": 1428,
+      "bufferView": 3,
+      "byteOffset": 12
+    },
+    {
+      "type": "VEC2",
+      "componentType": 5126,
+      "count": 1428,
+      "bufferView": 3,
+      "byteOffset": 24
+    },
+    {
+      "type": "VEC3",
+      "componentType": 5126,
+      "count": 1458,
+      "max": [
+        0.08394316583871841,
+        0.15544982254505157,
+        0.08394315838813782
+      ],
+      "min": [
+        -0.08394315838813782,
+        0.0003753884811885655,
+        -0.08394315838813782
+      ],
+      "bufferView": 4,
+      "byteOffset": 0
+    },
+    {
+      "type": "VEC3",
+      "componentType": 5126,
+      "count": 1458,
+      "bufferView": 4,
+      "byteOffset": 12
+    },
+    {
+      "type": "VEC2",
+      "componentType": 5126,
+      "count": 1458,
+      "bufferView": 4,
+      "byteOffset": 24
+    }
+  ],
+  "bufferViews": [
+    {
+      "buffer": 0,
+      "byteOffset": 0,
+      "byteLength": 32332,
+      "target": 34963
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 32332,
+      "byteLength": 23904,
+      "byteStride": 32,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 56236,
+      "byteLength": 8736,
+      "byteStride": 32,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 64972,
+      "byteLength": 45696,
+      "byteStride": 32,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 110668,
+      "byteLength": 46656,
+      "byteStride": 32,
+      "target": 34962
+    }
+  ],
+  "samplers": [
+    {
+      "magFilter": 9729,
+      "minFilter": 9987,
+      "wrapS": 10497,
+      "wrapT": 10497
+    }
+  ],
+  "textures": [
+    {
+      "source": 1,
+      "sampler": 0
+    },
+    {
+      "source": 0,
+      "sampler": 0
+    },
+    {
+      "source": 2,
+      "sampler": 0
+    }
+  ],
+  "images": [
+    {
+      "name": "potted_plant_04_nor_gl",
+      "mimeType": "image/jpeg",
+      "uri": "textures/potted_plant_04_nor_gl_512.jpg"
+    },
+    {
+      "name": "potted_plant_04_diff",
+      "mimeType": "image/jpeg",
+      "uri": "textures/potted_plant_04_diff_512.jpg"
+    },
+    {
+      "name": "potted_plant_04_rough",
+      "mimeType": "image/jpeg",
+      "uri": "textures/potted_plant_04_arm_512.jpg"
+    }
+  ],
+  "buffers": [
+    {
+      "uri": "potted_plant_04_tv.bin",
+      "byteLength": 157324
+    }
+  ],
+  "materials": [
+    {
+      "name": "potted_plant_04",
+      "doubleSided": true,
+      "pbrMetallicRoughness": {
+        "metallicFactor": 0,
+        "baseColorTexture": {
+          "index": 0
+        },
+        "metallicRoughnessTexture": {
+          "index": 2
+        }
+      },
+      "normalTexture": {
+        "index": 1
+      }
+    }
+  ],
+  "meshes": [
+    {
+      "name": "HaworthiaScan_Model_2.001",
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 4,
+            "NORMAL": 5,
+            "TEXCOORD_0": 6
+          },
+          "mode": 4,
+          "material": 0,
+          "indices": 0
+        }
+      ]
+    },
+    {
+      "name": "Plane.118",
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 7,
+            "NORMAL": 8,
+            "TEXCOORD_0": 9
+          },
+          "mode": 4,
+          "material": 0,
+          "indices": 1
+        }
+      ]
+    },
+    {
+      "name": "Plane.116",
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 10,
+            "NORMAL": 11,
+            "TEXCOORD_0": 12
+          },
+          "mode": 4,
+          "material": 0,
+          "indices": 2
+        }
+      ]
+    },
+    {
+      "name": "Mesh",
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 13,
+            "NORMAL": 14,
+            "TEXCOORD_0": 15
+          },
+          "mode": 4,
+          "material": 0,
+          "indices": 3
+        }
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "name": "potted_plant_04_ground",
+      "mesh": 0
+    },
+    {
+      "name": "potted_plant_04_dirt",
+      "mesh": 1
+    },
+    {
+      "name": "potted_plant_04_plant",
+      "mesh": 2
+    },
+    {
+      "name": "potted_plant_04_pot",
+      "mesh": 3
+    }
+  ],
+  "scenes": [
+    {
+      "name": "Scene",
+      "nodes": [
+        0,
+        1,
+        2,
+        3
+      ]
+    }
+  ],
+  "scene": 0
+}

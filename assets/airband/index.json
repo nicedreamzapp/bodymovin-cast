@@ -1,0 +1,88 @@
+{
+ "genres": [
+  {
+   "id": "rock",
+   "name": "ROCK",
+   "songs": [
+    {
+     "id": "here-we-go",
+     "name": "HERE WE GO",
+     "json": "rock/here-we-go.json"
+    },
+    {
+     "id": "hearts-pumping",
+     "name": "HEARTS PUMPING",
+     "json": "rock/hearts-pumping.json"
+    },
+    {
+     "id": "still-standing",
+     "name": "STILL STANDING",
+     "json": "rock/still-standing.json"
+    }
+   ]
+  },
+  {
+   "id": "pop",
+   "name": "POP",
+   "songs": [
+    {
+     "id": "everybody-is-a-star",
+     "name": "EVERYBODY IS A STAR",
+     "json": "pop/everybody-is-a-star.json"
+    },
+    {
+     "id": "feel-alive",
+     "name": "FEEL ALIVE",
+     "json": "pop/feel-alive.json"
+    },
+    {
+     "id": "watch-the-light",
+     "name": "WATCH THE LIGHT",
+     "json": "pop/watch-the-light.json"
+    }
+   ]
+  },
+  {
+   "id": "funk",
+   "name": "FUNK",
+   "songs": [
+    {
+     "id": "bodies-move",
+     "name": "BODIES MOVE",
+     "json": "funk/bodies-move.json"
+    },
+    {
+     "id": "funk-this-tight",
+     "name": "FUNK THIS TIGHT",
+     "json": "funk/funk-this-tight.json"
+    },
+    {
+     "id": "air-band-live",
+     "name": "AIR BAND LIVE",
+     "json": "funk/air-band-live.json"
+    }
+   ]
+  },
+  {
+   "id": "dance",
+   "name": "DANCE",
+   "songs": [
+    {
+     "id": "jump-up",
+     "name": "JUMP UP",
+     "json": "dance/jump-up.json"
+    },
+    {
+     "id": "touch-the-sky",
+     "name": "TOUCH THE SKY",
+     "json": "dance/touch-the-sky.json"
+    },
+    {
+     "id": "shake-the-walls",
+     "name": "SHAKE THE WALLS",
+     "json": "dance/shake-the-walls.json"
+    }
+   ]
+  }
+ ]
+}

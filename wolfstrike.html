@@ -1,0 +1,87 @@
+<!doctype html>
+<html>
+<head>
+<script src="_lg/polyfills.js"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>Wolf Strike · Body Movin'</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #07080a; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; cursor: crosshair; }
+  canvas { display: block; position: fixed; top:0;right:0;bottom:0;left:0; width: 100vw; height: 100vh; }
+  #hud { z-index: 2; }
+  .bph-grip { display: flex; align-items: center; justify-content: center; gap: .5em; margin-top: 1.2vmin !important; color: #ffe2b8 !important; }
+  .bph-grip:before { display: none !important; }
+  .bph-grip svg { width: 2.6em; height: 2.6em; flex: none; }
+  .bph-noshoot { color: #ff9a9a !important; margin-top: .6vmin !important; }
+  .bph-noshoot:before { display: none !important; }
+</style>
+
+<script src="body.js"></script>
+<script>BodyMovin.selfView = null;
+BodyMovin.menuBtnStyle = "top:max(10px,1.8vmin);left:calc(max(10px,1.8vmin) + max(108px,15vmin) + max(8px,1.2vmin));width:max(108px,15vmin);height:max(36px,5.6vmin);min-height:0;padding:0;border-radius:999px;border:1px solid rgba(255,255,255,.18);background:rgba(10,12,24,.55);color:#fff;font:800 max(14px,1.9vmin) -apple-system,system-ui,sans-serif;letter-spacing:.06em;opacity:1";
+BodyMovin.musicBtnStyle = "top:max(10px,1.8vmin);left:calc(max(10px,1.8vmin) + 2 * max(108px,15vmin) + 2 * max(8px,1.2vmin));width:max(36px,5.6vmin);height:max(36px,5.6vmin);min-width:0;min-height:0;border:1px solid rgba(255,255,255,.18);background:rgba(10,12,24,.55);color:#fff;opacity:1";
+</script>
+<script src="howto.js"></script>
+<script src="scores.js"></script>
+<script src="wolfstrike/rules.js"></script>
+<script src="wolfstrike/grip.js"></script>
+<script src="wolfstrike/assist.js"></script>
+<script>(function() {
+  const MODE_KEY = "ws.mode", q = new URLSearchParams(location.search).get("mode");
+  window.WS_MODE = q === "easy" || q === "arcade" ? q : (() => {
+    try {
+      const v = localStorage.getItem(MODE_KEY);
+      if (v === "easy" || v === "arcade") return v;
+    } catch (_) {
+    }
+    return "easy";
+  })();
+  const top = () => {
+    const v = Math.min(innerWidth, innerHeight) / 100;
+    return (Math.max(10, 1.8 * v) + Math.max(36, 5.6 * v) + Math.max(8, 1.2 * v)) / innerHeight;
+  };
+  const MOVES = {
+    arcade: [
+      { anim: "push", text: "Both hands together out in front, like gripping an Uzi. Point to aim" },
+      { anim: "push", text: "Hands together = fire. Apart = stop. Thrust forward for a grenade" },
+      { anim: "squat", text: "Duck to dodge enemy fire" }
+    ],
+    easy: [
+      { anim: "point", text: "Point one hand to aim. It locks on and fires by itself" },
+      { anim: "squat", text: "Squat to dodge enemy fire" },
+      { anim: "push", text: "Push both hands forward for a grenade" }
+    ]
+  };
+  window.WSHowTo = (m) => {
+    window.WS_MODE = m;
+    BodyMovin.howTo({ title: "WOLF STRIKE", corner: false, top: top(), bottom: 0.7, moves: MOVES[m] || MOVES.easy, you: "Shoot the ammo, grenades and health you see" });
+    extras();
+  };
+  window.WSHowTo(window.WS_MODE);
+  function extras() {
+    const card = document.querySelector(".bph-wrap:not(.bph-gone) .bph-card");
+    if (!card || card.querySelector(".bph-noshoot")) return;
+    if (window.WS_MODE === "arcade") {
+      const g = document.createElement("div");
+      g.className = "bph-you bph-grip";
+      g.innerHTML = '<svg viewBox="0 0 64 64" aria-hidden="true"><rect x="27" y="6" width="10" height="34" rx="2" fill="#2b2d30"/><rect x="24" y="10" width="16" height="8" rx="2" fill="#3a3c40"/><rect x="29" y="40" width="6" height="16" rx="1.5" fill="#1d1e20"/><path d="M14 30c0-6 6-9 12-9h4v20h-6c-6 0-10-4-10-11z" fill="#e2b48c"/><path d="M50 30c0-6-6-9-12-9h-4v20h6c6 0 10-4 10-11z" fill="#d6a47a"/><path d="M16 34h12M16 29h12M36 34h12M36 29h12" stroke="#b07f5c" stroke-width="1.6"/></svg><span>The grip: one hand over the other, arms out</span>';
+      card.appendChild(g);
+    }
+    const n = document.createElement("div");
+    n.className = "bph-you bph-noshoot";
+    n.textContent = "Don't shoot nurses, kids or hostages";
+    card.appendChild(n);
+  }
+  extras();
+  addEventListener("resize", () => setTimeout(extras, 50));
+  const ob = new MutationObserver(extras);
+  ob.observe(document.documentElement, { childList: true, subtree: true });
+})();
+</script>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<canvas id="hud"></canvas>
+<script type="module" src="wolfstrike/game.js"></script>
+</body>
+</html>

@@ -1,0 +1,46 @@
+<!doctype html>
+<html>
+<head>
+<script src="_lg/polyfills.js"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Whack-a-Mole Deluxe · Body Movin'</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #2a3a1c; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
+  canvas { display: block; position: fixed; top:0;right:0;bottom:0;left:0; width: 100vw; height: 100vh; }
+  #hud { z-index: 2; cursor: pointer; }
+</style>
+<style id="ui-phone-scores">@media (max-width:600px){html:has(.bphs-wrap) #bp-cam{visibility:hidden}}</style><!-- phone: the high-score card is nearly full width, so the live camera steps away while it is up -->
+
+</head>
+<body>
+<canvas id="c"></canvas>
+<canvas id="hud"></canvas>
+<script src="body.js"></script>
+<script>BodyMovin.realSelf = { view: "behind", outfit: "casual", ghost: "ready" };
+</script>
+<script>BodyMovin.menuBtnStyle = "top:max(10px,1.8vmin);left:calc(max(10px,1.8vmin) + max(108px,15vmin) + max(8px,1.2vmin));width:max(108px,15vmin);height:max(36px,5.6vmin);min-height:0;padding:0;border-radius:999px;border:1px solid rgba(255,255,255,.18);background:rgba(10,12,24,.55);color:#fff;font:800 max(14px,1.9vmin) -apple-system,system-ui,sans-serif;letter-spacing:.06em;opacity:1";
+BodyMovin.musicBtnStyle = "top:max(10px,1.8vmin);left:calc(max(10px,1.8vmin) + 2 * max(108px,15vmin) + 2 * max(8px,1.2vmin));width:max(36px,5.6vmin);height:max(36px,5.6vmin);min-width:0;min-height:0;border:1px solid rgba(255,255,255,.18);background:rgba(10,12,24,.55);color:#fff;opacity:1";
+window.UIBAND = (() => {
+  const vm = Math.min(innerWidth, innerHeight) / 100, top = (Math.max(10, 1.8 * vm) + Math.max(36, 5.6 * vm) + Math.max(8, 1.2 * vm)) / innerHeight;
+  const camW = Math.max(90, 15 * vm), camH = camW * 16 / 9 + 30, tall = innerHeight > innerWidth * 1.2;
+  return { tall, top, bottom: tall ? (innerHeight / 2 - camH / 2 - 8) / innerHeight : 0.74, start: tall ? (innerHeight / 2 + camH / 2 + 16) / innerHeight : 0.755 };
+})();
+</script>
+<script src="howto.js"></script>
+<script src="scores.js"></script>
+<script>BodyMovin.howTo({
+  title: "WHACK-A-MOLE",
+  corner: false,
+  top: UIBAND.top,
+  bottom: UIBAND.bottom,
+  compact: UIBAND.tall,
+  moves: [{ anim: "whack", text: "Swing a hand down on a mole" }, { anim: "squat", text: "Squat to whack the front row" }, { anim: "jump", text: "Jump to make a quake" }],
+  you: "Do not bonk the bunnies"
+});
+</script>
+<script>BodyMovin.selfView = { x: 0.86, y: 0.965, h: 0.3 };
+</script>
+<script type="module" src="_lg/moles-0.js"></script>
+</body>
+</html>

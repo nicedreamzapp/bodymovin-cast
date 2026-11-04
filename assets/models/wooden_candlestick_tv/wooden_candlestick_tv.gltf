@@ -1,0 +1,155 @@
+{
+  "asset": {
+    "generator": "glTF-Transform v4.5.1",
+    "version": "2.0"
+  },
+  "accessors": [
+    {
+      "type": "SCALAR",
+      "componentType": 5123,
+      "count": 12777,
+      "bufferView": 0,
+      "byteOffset": 0
+    },
+    {
+      "type": "VEC3",
+      "componentType": 5126,
+      "count": 2773,
+      "max": [
+        0.048493098467588425,
+        0.21959486603736877,
+        0.04921063035726547
+      ],
+      "min": [
+        -0.04866194725036621,
+        0,
+        -0.049385182559490204
+      ],
+      "bufferView": 1,
+      "byteOffset": 0
+    },
+    {
+      "type": "VEC3",
+      "componentType": 5126,
+      "count": 2773,
+      "bufferView": 1,
+      "byteOffset": 12
+    },
+    {
+      "type": "VEC2",
+      "componentType": 5126,
+      "count": 2773,
+      "bufferView": 1,
+      "byteOffset": 24
+    }
+  ],
+  "bufferViews": [
+    {
+      "buffer": 0,
+      "byteOffset": 0,
+      "byteLength": 25556,
+      "target": 34963
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 25556,
+      "byteLength": 88736,
+      "byteStride": 32,
+      "target": 34962
+    }
+  ],
+  "samplers": [
+    {
+      "magFilter": 9729,
+      "minFilter": 9987,
+      "wrapS": 10497,
+      "wrapT": 10497
+    }
+  ],
+  "textures": [
+    {
+      "source": 1,
+      "sampler": 0
+    },
+    {
+      "source": 0,
+      "sampler": 0
+    },
+    {
+      "source": 2,
+      "sampler": 0
+    }
+  ],
+  "images": [
+    {
+      "name": "wooden_candlestick_nor_gl",
+      "mimeType": "image/jpeg",
+      "uri": "textures/wooden_candlestick_nor_gl_512.jpg"
+    },
+    {
+      "name": "wooden_candlestick_diff",
+      "mimeType": "image/jpeg",
+      "uri": "textures/wooden_candlestick_diff_512.jpg"
+    },
+    {
+      "name": "wooden_candlestick_rough",
+      "mimeType": "image/jpeg",
+      "uri": "textures/wooden_candlestick_arm_512.jpg"
+    }
+  ],
+  "buffers": [
+    {
+      "uri": "wooden_candlestick_tv.bin",
+      "byteLength": 114292
+    }
+  ],
+  "materials": [
+    {
+      "name": "wooden_candlestick",
+      "pbrMetallicRoughness": {
+        "metallicFactor": 0,
+        "baseColorTexture": {
+          "index": 0
+        },
+        "metallicRoughnessTexture": {
+          "index": 2
+        }
+      },
+      "normalTexture": {
+        "index": 1
+      }
+    }
+  ],
+  "meshes": [
+    {
+      "name": "Mesh",
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 1,
+            "NORMAL": 2,
+            "TEXCOORD_0": 3
+          },
+          "mode": 4,
+          "material": 0,
+          "indices": 0
+        }
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "name": "wooden_candlestick",
+      "mesh": 0
+    }
+  ],
+  "scenes": [
+    {
+      "name": "Scene",
+      "nodes": [
+        0
+      ]
+    }
+  ],
+  "scene": 0
+}

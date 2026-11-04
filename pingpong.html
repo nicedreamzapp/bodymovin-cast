@@ -1,0 +1,256 @@
+<!doctype html>
+<html>
+<head>
+<script src="_lg/polyfills.js"></script>
+<meta charset="utf-8">
+<title>Table Tennis</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #07080c; overflow: hidden; font-family: -apple-system, system-ui, sans-serif; cursor: none; }
+  canvas { display: block; }
+  #gl { position: fixed; top:0;right:0;bottom:0;left:0; width: 100%; height: 100%; }
+  /* UI_SPEC 10/19: the score is ONE top-centre pill (you vs them); messages are one line in the middle, sized to the window */
+  #score { position: fixed; top: 1.6vmin; left: 50%; z-index: 4; display: flex; gap: max(10px, 1.6vmin); align-items: center; box-sizing: border-box; white-space: nowrap;
+           height: max(40px, 6.4vmin); padding: 0 max(16px, 2.6vmin); border-radius: 999px; color: #fff;
+           background: rgba(10,12,24,.55); border: 1px solid rgba(255,255,255,.18); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+           font: 800 max(13px, 1.9vmin)/1 -apple-system, system-ui, "Segoe UI", sans-serif; letter-spacing: .1em; }
+  #score b { font-size: max(22px, 3.6vmin); font-weight: 900; letter-spacing: 0; min-width: 1.2em; text-align: center; font-variant-numeric: tabular-nums; }
+  #score .who { color: rgba(255,255,255,.7); }
+  #score .dash { color: rgba(255,255,255,.4); }
+  /* call-outs sit off to the left by the curtains, never over the table (Matt 10/30: "right where the action is") */
+  #msg { position: fixed; top: 34%; left: 2.5vw; max-width: 22vw; text-align: left; color: #fff; font-size: min(5.2vmin, 4.2vw); line-height: 1.1; font-weight: 800; letter-spacing: .04em; white-space: normal;
+         text-shadow: 0 0 30px #00c8ff; opacity: 0; transition: opacity .3s; pointer-events: none; }
+  #sub { display: none !important; position: fixed; top: calc(38% + min(8vmin, 6.4vw) * 1.45); left: 0; right: 0; text-align: center; color: #ffffffc8; font-size: max(15px, min(3vmin, 4vw)); letter-spacing: .04em; opacity: 0; transition: opacity .3s; pointer-events: none; }
+  #src { position: fixed; top: 100px; left: 22px; display: flex; gap: 10px; z-index: 6; }
+  #src button { position: relative; cursor: pointer; padding: 14px 22px; font-size: 17px !important; border-radius: 999px; border: 1px solid #ffffff30; background: #ffffff0c; color: #ffffffaa;
+                font: 600 13px -apple-system, system-ui, sans-serif; letter-spacing: .08em; backdrop-filter: blur(6px); }
+  #src button.on { background: linear-gradient(90deg, #7a3cff99, #00c8ff99); color: #fff; border-color: #ffffffaa; }
+  /* title (BODY-UI-PLAN fix 5): START big, "change" smaller beside it, a hand of empty space between; stacked upright on a phone */
+  .startrow { display: flex; align-items: center; justify-content: center; gap: max(8vw, 13vmin); }
+  @media (max-aspect-ratio: 1/1) { .startrow { flex-direction: column; gap: max(40px, 6vh); } }
+  #go, #again { min-width: max(240px, 40vmin); min-height: max(80px, 16vmin); font-size: max(22px, 5vmin) !important; box-sizing: border-box; }
+  #chg { position: relative; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .5vmin; box-sizing: border-box;
+         min-width: max(150px, 24vmin); min-height: max(66px, 12vmin); padding: 0 max(16px, 2.6vmin); border-radius: 999px; border: 1px solid rgba(255,255,255,.4);
+         background: rgba(10,12,24,.55); color: #fff; font: 800 max(15px, 2.6vmin) -apple-system, system-ui, sans-serif; letter-spacing: .1em; -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+  #chg .sub { font-size: max(12px, 1.7vmin); letter-spacing: .2em; opacity: .75; }
+  [data-hover] { overflow: hidden; }
+  [data-hover]::after { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: var(--p, 0%); background: #ffffff45; pointer-events: none; }
+  [data-hover].hov { border-color: #ffffffdd !important; box-shadow: 0 0 18px #ffffff55; }
+  #go, #end button { position: relative; cursor: pointer; padding: 0 max(36px, 6vmin); height: max(52px, 9vmin); border-radius: 999px; border: 2px solid #ffffffaa; background: #ffffff14; color: #fff;
+        font: 800 max(20px, 3.6vmin) -apple-system, system-ui, sans-serif; letter-spacing: .2em; }
+  #auto { font-size: max(14px, 2vmin); color: #ffffff90; letter-spacing: .08em; min-height: 1.2em; }
+  #status { display: none !important; }
+  /* MUSIC DURING PLAY (Matt 10/22: "there's a ton of space to have them"): the music switch alone in the top-RIGHT corner
+     while a match runs, as big as the pause button in the top-left (same rule as the shared body.js update) */
+  html[data-bp-mode=play] body #bp-sys > #bp-music, html[data-bp-mode=play] body > #bp-music {
+    position: fixed !important; right: max(1.6vmin, env(safe-area-inset-right)) !important; left: auto !important; top: max(1.6vmin, env(safe-area-inset-top)) !important;
+    width: max(76px, 11vmin) !important; height: max(76px, 11vmin) !important; min-width: 0 !important; min-height: 0 !important; padding: 0 !important; margin: 0 !important;
+    border-radius: 50% !important; z-index: 32 !important; display: flex !important; align-items: center; justify-content: center;
+    background: rgba(10,12,24,.6) !important; border: 2px solid rgba(255,255,255,.45) !important; opacity: 1 !important; transform: none !important; }
+  #start, #end { position: fixed; top:0;right:0;bottom:0;left:0; display: flex; flex-direction: column; gap: max(12px, 2.2vmin); align-items: center; justify-content: center; color: #fff; background: none; cursor: pointer; z-index: 5; }   /* nothing dims the table (Matt 10/23) */
+  #end .endcard { display: flex; flex-direction: column; align-items: center; gap: max(8px, 1.2vmin); padding: max(14px, 2.2vmin) max(36px, 6vmin) max(18px, 2.8vmin); border-radius: max(18px, 3vmin);
+                  background: rgba(10,12,24,.62); border: 1px solid rgba(255,255,255,.18); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+  #end { display: none; cursor: default; }
+  #end .lbl { font: 800 max(15px, 2.6vmin) -apple-system, system-ui, sans-serif; letter-spacing: .3em; color: #9fe7ff; }
+  #end .big { font: 900 min(20vmin, 22vw)/1 -apple-system, system-ui, sans-serif; font-variant-numeric: tabular-nums; text-shadow: 0 0 30px #00c8ff; }
+  #end .row { display: flex; gap: max(14px, 3vmin); margin-top: 3vmin; }
+  #start .t { font-size: 40px; letter-spacing: .2em; font-weight: 800; }
+  #start .s { font-size: 17px; color: #ffffffa0; letter-spacing: .06em; max-width: 620px; text-align: center; line-height: 1.6; }
+</style>
+<!-- boxing's tuned picture filter (10/21, Matt loved how the boxer follows him): less smoothing lag, 55 ms lead -->
+<script>window.BP_TUNE = { imgMin: 3, predictMs: 55 };
+</script>
+<script src="body.js"></script>
+<script>BodyMovin.figure = { torso: 0.26, chestY: 0.56, armGain: 1.1, legs: false, frameReach: false };
+BodyMovin.reachGain = 1.45;
+BodyMovin.mirrorFollow = true;
+</script>
+<script src="howto.js"></script>
+<script src="scores.js"></script>
+<script src="tips.js"></script>
+<script>window.BP_DIR = "";
+if (BP_DIR && BodyMovin.demo) {
+  const f0 = window.fetch.bind(window);
+  window.fetch = (u, o) => f0(typeof u === "string" && /(^|\/)demo_body\.jsonl$/.test(u) ? BP_DIR + "demo_body.jsonl" : u, o);
+}
+window.NoMouse = /* @__PURE__ */ (function() {
+  let cv = null;
+  const visible = (el) => el.getClientRects().length && getComputedStyle(el).visibility !== "hidden";
+  function tick(now, showHands) {
+    for (const el of document.querySelectorAll("[data-hover]")) {
+      const id = el.dataset.dwell || "nm-" + (el.id || el.dataset.hover || el.textContent);
+      if (!visible(el) || el.closest("#bp-sys") && BodyMovin.sysMode && BodyMovin.sysMode() === "play") {
+        if (el._nmVis !== false) {
+          el._nmVis = false;
+          BodyMovin.dwell(id, false, now);
+          el.classList.remove("hov");
+          el.style.setProperty("--p", "0%");
+        }
+        continue;
+      }
+      el._nmVis = true;
+      const r = el.getBoundingClientRect(), pad = 0;
+      const over = (BodyMovin.live || BodyMovin.mouse) && BodyMovin.handOver({ x: r.left - pad, y: r.top - pad, w: r.width + pad * 2, h: r.height + pad * 2 }, innerWidth, innerHeight);
+      const k = BodyMovin.dwell(id, over, now, +(el.dataset.ms || 900));
+      el.style.setProperty("--p", Math.round(k * 100) + "%");
+      el.classList.toggle("hov", !!over);
+      if (k >= 1) {
+        el.style.setProperty("--p", "0%");
+        el.click();
+      }
+    }
+    if (!cv) {
+      cv = document.createElement("canvas");
+      cv.id = "nm-hands";
+      cv.style.cssText = "position:fixed;top:0;right:0;bottom:0;left:0;width:100%;height:100%;pointer-events:none;z-index:20";
+      document.body.appendChild(cv);
+    }
+    const dpr = Math.min(2, devicePixelRatio || 1), W = Math.round(innerWidth * dpr), H = Math.round(innerHeight * dpr);
+    if (cv.width !== W || cv.height !== H) {
+      cv.width = W;
+      cv.height = H;
+    }
+    const c = cv.getContext("2d");
+    c.clearRect(0, 0, W, H);
+    if (showHands) BodyMovin.drawHands(c, W, H, 0.8);
+  }
+  return { tick };
+})();
+</script>
+<!-- YOU FROM BEHIND (10/22): the see-through you is bodyfig.js's figure standing at your end of the table (boxing's
+     figure engine), holding the paddle; body.js's own overlay figure is off here, like boxing -->
+<script>BodyMovin.selfView = null;
+</script>
+
+</head>
+<body>
+<div id="score" style="display:none"><span class="who">YOU</span><b id="me">0</b><span class="dash">–</span><b id="opp">0</b><span class="who">THEM</span></div>
+<!-- UI_SPEC 10/19 (group A): ONE top-left system row: HOME, then body.js's MENU and music buttons, same size, same glass.
+     The game's own HOME element (id given in data-home) is moved in first; MENU and music are adopted as body.js creates
+     them. BPUI.top(...) gives every game the same top-centre / top-right slots, kept clear of this row at any window size. -->
+<!-- the #bp-sys row's look and 60 px size now come from body.js (#bp-sys-css), shared by every game -->
+<div id="bp-sys" data-home="bpHome"></div>
+<script>(function() {
+  const row = document.getElementById("bp-sys");
+  const adopt = () => {
+    const home = document.getElementById(row.dataset.home || "bp-home"), menu = document.getElementById("bp-menu"), mus = document.getElementById("bp-music");
+    for (const e of [home, menu, mus]) if (e && e.parentElement !== row) row.appendChild(e);
+    if (home && row.firstChild !== home) row.insertBefore(home, row.firstChild);
+    if (menu && mus && menu.nextSibling !== mus) row.insertBefore(mus, menu.nextSibling);
+    const pz = document.getElementById("bp-pause");
+    if (pz && pz.parentElement === row && row.lastElementChild !== pz) row.appendChild(pz);
+  };
+  new MutationObserver(adopt).observe(document.body, { childList: true });
+  new MutationObserver(adopt).observe(row, { childList: true });
+  if (window.BodyMovin && BodyMovin.camStyle === void 0 && innerWidth < innerHeight) BodyMovin.camStyle = "top:auto;bottom:max(1.4vmin,env(safe-area-inset-bottom));transform:none";
+  addEventListener("DOMContentLoaded", adopt);
+  setTimeout(adopt, 0);
+  window.BPUI = {
+    homeButton(go) {
+      const a = document.createElement("a");
+      a.id = "bp-home";
+      a.href = "index.html";
+      a.textContent = "← HOME";
+      a.setAttribute("aria-label", "Body Movin' home");
+      a.addEventListener("click", (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        (go || (() => {
+          location.href = "index.html";
+        }))();
+      });
+      a.addEventListener("pointerdown", (e) => e.stopPropagation());
+      row.insertBefore(a, row.firstChild);
+      (function loop(now) {
+        requestAnimationFrame(loop);
+        const BP = window.BodyMovin;
+        if (!BP || !BP.handOver || !BP.dwell || a.offsetParent === null) return;
+        const r = a.getBoundingClientRect(), over = BP.handOver({ x: r.left, y: r.top, w: r.width, h: r.height }, innerWidth, innerHeight);
+        const k = BP.dwell("bp-home", over, now, 1200);
+        a.style.boxShadow = over ? "inset " + Math.round((k || 0) * r.width) + "px 0 0 #66e0ff55" : "none";
+        if (k === 1) (go || (() => {
+          location.href = "index.html";
+        }))();
+      })(performance.now());
+      return a;
+    },
+    // the system row's box in CSS px (empty row: a zero box at its corner)
+    sys() {
+      const r = row.getBoundingClientRect();
+      return r.width ? r : { left: r.left, top: r.top, right: r.left, bottom: r.top + Math.max(36, Math.min(innerWidth, innerHeight) * 0.054), width: 0, height: 0 };
+    },
+    // the standard top slots: a centre pill (cw x ch) and an optional top-right item (rw x rh), CSS px.
+    // The centre pill stays centred unless that would touch the system row or the right item; then it slides,
+    // and if there is still no room (narrow phone) it drops just below the system row.
+    top(cw, ch, rw = 0, rh = 0) {
+      const W = innerWidth, H = innerHeight, vmin = Math.min(W, H) / 100, s = this.sys(), m = s.top, gap = Math.max(8, 1.2 * vmin);
+      const r = { x: W - Math.max(m, s.left) - rw, y: m };
+      let x = W / 2 - cw / 2, y = m;
+      const lo = s.right + gap, hi = rw ? r.x - gap : W - Math.max(m, s.left);
+      if (x < lo) x = lo;
+      if (x + cw > hi) x = hi - cw;
+      if (x < lo) {
+        x = Math.max(gap, W / 2 - cw / 2);
+        y = Math.max(s.bottom, rw ? r.y + rh : 0) + gap;
+      }
+      return { c: { x, y, w: cw, h: ch }, r: { x: r.x, y: r.y, w: rw, h: rh }, bottom: Math.max(y + ch, rw ? r.y + rh : 0, s.bottom) };
+    },
+    // where the live camera view is (or would be, once the phone sends its picture): games keep their HUD out of it
+    camZone() {
+      for (const id of ["bp-cam", "livecam"]) {
+        const cam = document.getElementById(id);
+        if (cam && cam.offsetParent !== null) {
+          const c = cam.getBoundingClientRect();
+          if (c.width) return c;
+        }
+      }
+      const W = innerWidth, H = innerHeight, vmin = Math.min(W, H) / 100, w = Math.max((this.camVmin || 15) * vmin, 90), h = w * 16 / 9 + Math.max(14, 2.2 * vmin), m = 1.4 * vmin;
+      const top = W < H ? H - m - h : H / 2 - h / 2;
+      return { left: W - m - w, right: W - m, top, bottom: top + h, width: w, height: h };
+    },
+    // body.js's own "Raise both hands to start" check-in card (shown until a phone player has checked in): its box, or null.
+    // Start screens keep their START above the bottom 13% for it; HUD keeps clear of it during play.
+    coachZone() {
+      const BP = window.BodyMovin;
+      if (!BP || BP.ready || !BP.live || BP.mouse || BP.simulating) return null;
+      const W = innerWidth, H = innerHeight, fs = Math.max(16, H * 0.034), cy = BP.howTo && BP.howTo.visible ? H * 0.93 : H * 0.16, w = Math.max(fs * 10, fs * 13.5) + fs * 4.2;
+      return { left: W / 2 - w / 2 - fs, right: W / 2 + w / 2 + fs, top: cy - fs * 1.4, bottom: cy + fs * 1.7, width: w + 2 * fs, height: fs * 3.1 };
+    },
+    // the one bottom-centre prompt (w x h, CSS px): its top-left corner, lifted above the live camera view if they would touch
+    bottom(w, h) {
+      const W = innerWidth, H = innerHeight, vmin = Math.min(W, H) / 100, gap = Math.max(8, 1.2 * vmin), x = W / 2 - w / 2;
+      let y = H - h - Math.max(10, 3 * vmin);
+      const c = this.camZone();
+      if (x + w > c.left - gap && x < c.right + gap && y + h > c.top - gap && y < c.bottom + gap) y = c.top - gap - h;
+      return { x, y };
+    }
+  };
+})();
+</script>
+<a id="bpHome" data-hover data-dwell="bp-home" data-ms="1200" href="index.html">← HOME</a>
+<div id="src" style="display:none"><button data-hover data-s="leap">LEAP</button><button data-hover data-s="iphone">IPHONE</button><button data-hover id="center" title="or press C">CENTER ME</button></div>
+<div id="msg"></div><div id="sub"></div>
+<div id="status">connecting to the sensor…</div>
+<div id="start"><div class="t">TABLE TENNIS</div>
+  <div class="s">Your right arm is the paddle. Lean or step to move along the table. Swing forehand on your right side,<br>
+  backhand across your body. Swing harder for faster, deeper shots. First to 11, win by 2.<br><br>Rest your hand on START</div>
+  <!-- ONE big START (the remembered level) + one smaller "change" off to the side (BODY-UI-PLAN fix 5): the old
+       EASY / NORMAL / PRO row touched each other and touched START, so one hand lit two at once -->
+  <div class="startrow"><button id="go" data-hover data-ms="900">START</button>
+    <button id="chg" data-hover data-ms="900"><span id="lvLbl">LEVEL: NORMAL</span><span class="sub">change</span></button></div><div id="auto"></div></div>
+<div id="end"><div class="endcard"><div class="lbl" id="endWho">YOU WIN!</div><div class="big" id="endScore">11 – 7</div></div>
+  <div class="row"><button id="again" data-hover data-ms="800">PLAY AGAIN</button><button id="endHome" class="bp-leave" data-hover data-ms="1400">HOME</button></div></div>
+<script>BodyMovin.howTo({
+  title: "TABLE TENNIS",
+  mount: "#start",
+  before: ".startrow",
+  hideEls: ".t, .s",
+  corner: false,
+  compact: true,
+  moves: [{ anim: "swipe", text: "Swing your paddle hand to hit the ball" }, { anim: "step", text: "Lean or step to move along the table" }],
+  you: "Before the first serve, raise the hand you play with"
+});
+</script>
+<script type="module" src="_lg/pingpong-0.js"></script>
+
+</body>
+</html>

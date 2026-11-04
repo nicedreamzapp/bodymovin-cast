@@ -1,0 +1,46 @@
+<!doctype html>
+<html>
+<head>
+<script src="_lg/polyfills.js"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Body Breaker · Body Movin'</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #d8d4cc; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
+  canvas { display: block; position: fixed; top:0;right:0;bottom:0;left:0; width: 100vw; height: 100vh; }
+  #hud { z-index: 2; cursor: pointer; }
+  /* phone: the how-to card sits left of the live camera view (right edge middle) */
+  @media (max-width: 600px) { body:has(#bp-cam) .bph-wrap:not(.bph-mounted) { right: calc(max(90px,15vmin) + 1.4vmin + max(8px,1.2vmin)) !important; left: max(10px,1.8vmin) !important; }
+                              body:has(#bp-cam) .bph-wrap:not(.bph-mounted) .bph-card { width: 100% !important; max-width: none !important; }
+                              body:has(#bp-cam) .bph-wrap:not(.bph-mounted) .bph-txt { font-size: 5vw !important; } body:has(#bp-cam) .bph-wrap:not(.bph-mounted) .bph-title { font-size: 9vw !important; } }
+</style>
+<style id="ui-phone-scores">@media (max-width:600px){html:has(.bphs-wrap) #bp-cam{visibility:hidden}}</style><!-- phone: the high-score card is nearly full width, so the live camera steps away while it is up -->
+
+</head>
+<body>
+<canvas id="c"></canvas>
+<canvas id="hud"></canvas>
+<script src="body.js"></script>
+<script>BodyMovin.selfView = null;
+</script>
+<script>BodyMovin.menuBtnStyle = "top:max(10px,1.8vmin);left:calc(max(10px,1.8vmin) + max(108px,15vmin) + max(8px,1.2vmin));width:max(108px,15vmin);height:max(36px,5.6vmin);min-height:0;padding:0;border-radius:999px;border:1px solid rgba(255,255,255,.18);background:rgba(10,12,24,.55);color:#fff;font:800 max(14px,1.9vmin) -apple-system,system-ui,sans-serif;letter-spacing:.06em;opacity:1";
+BodyMovin.musicBtnStyle = "top:max(10px,1.8vmin);left:calc(max(10px,1.8vmin) + 2 * max(108px,15vmin) + 2 * max(8px,1.2vmin));width:max(36px,5.6vmin);height:max(36px,5.6vmin);min-width:0;min-height:0;border:1px solid rgba(255,255,255,.18);background:rgba(10,12,24,.55);color:#fff;opacity:1";
+</script>
+<script src="howto.js"></script>
+<script src="scores.js"></script>
+<script>BodyMovin.howTo({
+  title: "BODY BREAKER",
+  corner: false,
+  top: (() => {
+    const v = Math.min(innerWidth, innerHeight) / 100;
+    return (Math.max(10, 1.8 * v) + Math.max(36, 5.6 * v) + Math.max(8, 1.2 * v)) / innerHeight;
+  })(),
+  // just under the HOME / MENU / music row
+  bottom: 0.74,
+  moves: [{ anim: "lean", text: "Lean or step left and right: the paddle goes where you go" }, { anim: "raise", text: "Lift a hand to launch the ball" }, { anim: "jump", text: "Jump for a fireball" }],
+  you: "You are the paddle"
+});
+</script>
+<script type="module" src="_lg/breaker-0.js"></script>
+</body>
+</html>

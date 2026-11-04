@@ -1,0 +1,505 @@
+<!doctype html>
+<html>
+<head>
+<script src="_lg/polyfills.js"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Body Movin'</title>
+<style>
+  :root { --u: min(1vw, 1.78vh); }
+  html, body { margin: 0; height: 100%; background: radial-gradient(120% 90% at 50% 0%, #1d1640 0%, #0b0918 55%, #05040b 100%); color: #fff; font-family: -apple-system, system-ui, 'Segoe UI', sans-serif; overflow: hidden; }
+  /* (10/31 playtest: 471 px wide on a 440 px phone, the DAY STREAK tile cut off; 1084 on a 1049 window) the phone-link card
+     with its QR and text made the header wider than the screen and the one-column grid stretched with it. The column is
+     now the screen width, the header wraps the stats under the card when it must, and the card's text can shrink. */
+  #wrap { position: absolute; top:0;right:0;bottom:0;left:0; padding: calc(var(--u) * 2.4) calc(var(--u) * 3); display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; gap: calc(var(--u) * 1.6); }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--u) * 1.4) calc(var(--u) * 1.8); min-width: 0; }
+  h1 { margin: 0; font-weight: 200; letter-spacing: .3em; font-size: calc(var(--u) * 3.0); white-space: nowrap; }
+  h1 b { font-weight: 800; background: linear-gradient(90deg, #ff7ad9, #66e0ff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .stats { display: flex; gap: calc(var(--u) * 1.2); margin-left: auto; }
+  .stat { background: #ffffff0d; border: 1px solid #ffffff1c; border-radius: calc(var(--u) * 1.4); padding: calc(var(--u) * .7) calc(var(--u) * .9); text-align: center; min-width: calc(var(--u) * 6); }
+  .stat b { display: block; font-size: calc(var(--u) * 2.3); }
+  .stat span { display: block; font-size: calc(var(--u) * .9); color: #ffffffa0; letter-spacing: .08em; max-width: calc(var(--u) * 6); margin: 0 auto; line-height: 1.25; }   /* two short lines (ACTIVE MIN / TODAY): the header fits one row on a TV */
+  .brand { display: flex; flex-direction: column; gap: calc(var(--u) * .5); }
+  .tips { margin: 0; padding: 0; list-style: none; font-size: calc(var(--u) * 1.0); line-height: 1.45; color: #ffffffb8; }
+  .tips li::before { content: '•'; color: #66e0ff; margin-right: calc(var(--u) * .5); }
+  .tips b { color: #fff; font-weight: 700; }
+  #conn { min-width: 0; flex: 0 1 auto; display: flex; align-items: center; gap: calc(var(--u) * 1.2); background: #ffffff0d; border: 1px solid #ffffff1c; border-radius: calc(var(--u) * 1.4); padding: calc(var(--u) * .6) calc(var(--u) * 1.2); }
+  #conn > canvas { width: calc(var(--u) * 7); height: calc(var(--u) * 7); background: #fff; border-radius: calc(var(--u) * .6); padding: calc(var(--u) * .3); }
+  #conn .t { font-size: calc(var(--u) * 1.15); line-height: 1.35; max-width: calc(var(--u) * 21); min-width: 0; overflow-wrap: anywhere; }
+  #conn .t b { color: #9dffd0; }
+  /* the tiny live camera (body.js #bp-cam) sits in the card next to "Phone connected" (10/21), not in a corner */
+  #bp-cam-slot #bp-cam { position: relative !important; left: auto !important; bottom: auto !important; width: calc(var(--u) * 5.4) !important; min-width: 0 !important; max-width: none !important; border-radius: calc(var(--u) * .6) !important; }
+  #conn .code { font-size: calc(var(--u) * 2); font-weight: 800; letter-spacing: .25em; color: #ffd36b; }
+  /* BIGGER TILES, FARTHER APART (BODY-UI-PLAN fix 10): 4 columns x 3 rows with 0.05 W gaps, in pages; the last cell of a
+     page is MORE GAMES, the first cell of the next is BACK (hold either 1 s with one hand). Was 6 columns, 17 px gaps:
+     one hand sat over two tiles. A tall phone screen gets 2 columns x 5 rows. */
+  #grid { display: grid; grid-template-columns: repeat(var(--cols, 4), minmax(0, 1fr)); grid-template-rows: repeat(var(--rows, 3), minmax(0, 1fr)); gap: 5vw; min-height: 0; }
+  #grid > .pg-off { display: none !important; }
+  .tile.nav { background: #ffffff0c; border: 2px dashed #ffffff55; justify-content: center; }
+  .tile.nav .nm { font-size: calc(var(--u) * 1.8); white-space: nowrap; }
+  .tile.nav .ar { font-size: calc(var(--u) * 5); line-height: 1; z-index: 1; }
+  .tile.nav .ds { color: #ffffffa0; }
+  .tile { color: #fff; text-decoration: none; position: relative; border-radius: calc(var(--u) * 1.8); padding: calc(var(--u) * 1.1) calc(var(--u) * 1.4); background: linear-gradient(160deg, var(--c1), var(--c2)); border: 2px solid #ffffff22;
+          display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden; cursor: pointer; transition: transform .18s, box-shadow .18s, border-color .18s; outline: none; }
+  /* REAL PICTURES (Matt 10/20: "should we make it have a better pic or an actual pic of the game?"): each card shows a
+     real moment from that game, a dark fade at the bottom keeps the name readable; the picture zooms a little on hover */
+  .tile .pic { position: absolute; top:0;right:0;bottom:0;left:0; background-size: cover; background-position: center; transition: transform .35s; }
+  .tile .pic::after { content: ''; position: absolute; top:0;right:0;bottom:0;left:0; background: linear-gradient(180deg, #0000 30%, #000a 68%, #000e 100%); }
+  .tile:hover .pic, .tile:focus .pic, .tile.hot .pic { transform: scale(1.08); }
+  .tile .nm, .tile .ds, .tile .tag, .tile .best, .tile .fill { z-index: 1; }
+  .tile.haspic .ic { display: none; }
+  /* CARD TEXT (Matt 10/20: "make the text easier to see... give it more character and life and centering"): centred,
+     chunky rounded letters with a dark edge plus a glow in the game's own colour, a shine sweeps across when a hand is on it */
+  .tile { align-items: center; text-align: center; }
+  .tile .nm { max-width: 96%; font-family: 'Arial Rounded MT Bold', 'Nunito', 'Varela Round', ui-rounded, system-ui, sans-serif; font-weight: 900;
+              font-size: calc(var(--u) * 1.95); letter-spacing: .01em; line-height: 1.02; color: #fff;
+              -webkit-text-stroke: calc(var(--u) * .06) #0009; paint-order: stroke fill;
+              text-shadow: 0 calc(var(--u) * .18) 0 var(--c1), 0 0 calc(var(--u) * .5) #000c, 0 0 calc(var(--u) * 1.6) var(--c2); transition: transform .2s; }
+  .tile .ds { max-width: 96%; font-weight: 700; font-size: calc(var(--u) * .95); color: #fff; text-shadow: 0 1px 3px #000, 0 0 calc(var(--u) * .8) #000c; margin-top: calc(var(--u) * .35); }
+  .tile:hover .nm, .tile:focus .nm, .tile.hot .nm { transform: scale(1.08) translateY(calc(var(--u) * -.15)); }
+  .tile .shine { position: absolute; top:0;right:0;bottom:0;left:0; z-index: 1; pointer-events: none; background: linear-gradient(105deg, #0000 35%, #ffffff40 50%, #0000 65%); transform: translateX(-120%); }
+  .tile:hover .shine, .tile:focus .shine, .tile.hot .shine { transition: transform .8s ease-out; transform: translateX(120%); }
+  .tile .tag { font-weight: 800; }
+  .tile .ic { position: absolute; top: calc(var(--u) * .6); right: calc(var(--u) * .8); font-size: calc(var(--u) * 4.2); filter: drop-shadow(0 6px 18px #0008); }
+  .tile .nm { max-width: 90%; line-height: 1.1; font-size: calc(var(--u) * 1.55); font-weight: 800; letter-spacing: .02em; text-shadow: 0 2px 10px #0008; }
+  .tile .ds { max-width: 95%; font-size: calc(var(--u) * .9); color: #ffffffd0; margin-top: calc(var(--u) * .25); }
+  .tile .tag { position: absolute; top: calc(var(--u) * .8); left: calc(var(--u) * 1.1); font-size: calc(var(--u) * .85); letter-spacing: .14em; color: #ffffffd8; background: #0005; padding: calc(var(--u) * .25) calc(var(--u) * .7); border-radius: 999px; }
+  .tile .best { position: absolute; top: calc(var(--u) * 2.6); left: calc(var(--u) * 1.1); font-size: calc(var(--u) * .9); color: #ffd36b; }
+  .tile:hover, .tile:focus, .tile.hot { transform: scale(1.045); border-color: #fff; box-shadow: 0 0 calc(var(--u) * 3) #ffffff55; z-index: 2; }
+  .tile .fill { position: absolute; left: 0; bottom: 0; height: calc(var(--u) * .6); width: 0; background: #fff; }
+  .tile.off { opacity: .35; pointer-events: none; }
+  /* NEW-AND-GROWING NOTE (Matt 10/20): sits in the grid's empty space after the last game, see-through, never a button */
+  #beta { grid-column: span var(--span, 1); align-self: stretch; overflow: hidden; overflow-wrap: anywhere; border-radius: calc(var(--u) * 1.8); border: 2px dashed #ffffff30; background: #ffffff0c;
+          display: flex; flex-direction: column; justify-content: center; padding: calc(var(--u) * 1) calc(var(--u) * 1.8); color: #ffffffcc;
+          font-size: calc(var(--u) * 1.05); line-height: 1.35; }
+  #beta.narrow { font-size: calc(var(--u) * .9); padding: calc(var(--u) * .8); }
+  #beta b { color: #ffd36b; font-size: calc(var(--u) * 1.25); }
+  #beta a { color: #9dd8ff; }
+  #hands { position: fixed; top:0;right:0;bottom:0;left:0; pointer-events: none; z-index: 5; }
+  #setup { position: fixed; top:calc(var(--u) * 12);right:0;bottom:0;left:0; z-index: 4; padding: 1vh 0 2vh; box-sizing: border-box;   /* below the header, so the QR code stays visible */ display: flex; align-items: center; justify-content: center; background: none; pointer-events: none; }   /* Matt 10/23: nothing ever dims the screen; the card floats, the home stays bright and clickable around it */
+  #setup .sc { pointer-events: auto; }
+  #setup.hide { display: none; }
+  #setup .sc { padding-top: 1.6vh !important; padding-bottom: 1.6vh !important; max-height: 100%; overflow: auto; box-sizing: border-box; width: min(92vw, calc(var(--u) * 92)); background: linear-gradient(180deg, #1d1640, #0b0918); border: 1px solid #ffffff26; border-radius: calc(var(--u) * 2.4); padding: calc(var(--u) * 2.2) calc(var(--u) * 3); text-align: center; box-shadow: 0 2vmin 6vmin #000a; }
+  #setup .st { letter-spacing: .3em; font-weight: 800; font-size: calc(var(--u) * 1.3); color: #66e0ff; margin-bottom: calc(var(--u) * .6); }
+  #setup svg:not(.seal) { width: 100%; height: auto; max-height: 26vh; display: block; }
+  #setup .sl { font-size: calc(var(--u) * 1.45); line-height: 1.5; margin: calc(var(--u) * .8) 0; color: #ffffffe0; }
+  #setup .sl b { color: #ffd36b; }
+  #setup .sp { font-size: calc(var(--u) * 1.2); line-height: 1.5; color: #c9d6ff; background: #ffffff0a; border: 1px solid #ffffff1a; border-radius: calc(var(--u) * 1.2); padding: calc(var(--u) * .8) calc(var(--u) * 1.4); }
+  #setup .sp b { color: #9dffd0; }
+  #setup .sp { display: flex; align-items: center; gap: calc(var(--u) * 1.6); text-align: left; }
+  #setup .sp .seal { width: min(calc(var(--u) * 13), 18vh); height: min(calc(var(--u) * 13), 18vh); min-width: 84px; min-height: 84px; flex: none; }
+  #setup button { margin-top: calc(var(--u) * 1.2); font: 800 calc(var(--u) * 1.5) -apple-system, system-ui, sans-serif; color: #fff; background: linear-gradient(90deg, #ff7ad9, #66e0ff); border: 0; border-radius: 999px; padding: calc(var(--u) * .8) calc(var(--u) * 3); cursor: pointer; }
+  #castwait { position: fixed; top:0;right:0;bottom:0;left:0; z-index: 6; display: flex; align-items: center; justify-content: center; background: #05040be0; backdrop-filter: blur(4px); }
+  #castwait.hide { display: none; }
+  #castwait .cw { text-align: center; padding: calc(var(--u) * 3) calc(var(--u) * 5); border-radius: calc(var(--u) * 2.4); background: linear-gradient(180deg, #1d1640f0, #0b0918f5); border: 1px solid #ffffff26; }
+  #castwait .cwt { font-size: calc(var(--u) * 3.4); font-weight: 800; }
+  #castwait .cws { margin-top: calc(var(--u) * 1.2); font-size: calc(var(--u) * 1.5); color: #ffffffb0; }
+  #castwait .cws b { color: #ffd36b; letter-spacing: .25em; }
+  #castwait .dots span { display: inline-block; width: calc(var(--u) * 1.2); height: calc(var(--u) * 1.2); margin: calc(var(--u) * 1.6) calc(var(--u) * .5) 0; border-radius: 50%; background: #66e0ff; animation: cwd 1.2s infinite ease-in-out; }
+  #castwait .dots span:nth-child(2) { animation-delay: .2s; } #castwait .dots span:nth-child(3) { animation-delay: .4s; }
+  @keyframes cwd { 0%, 80%, 100% { opacity: .2; transform: scale(.7); } 40% { opacity: 1; transform: scale(1); } }
+  #foot { position: fixed; bottom: calc(var(--u) * .8); right: calc(var(--u) * 3); font-size: calc(var(--u) * 1); color: #ffffff70; }
+  #foot a { color: #ffffffb0; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <header>
+    <div class="brand"><h1>BODY <b>MOVIN'</b></h1></div>
+    <div id="conn"><canvas id="qr" width="300" height="300"></canvas><div class="t" id="connt">connecting…</div><div id="bp-cam-slot"></div></div>
+    <div class="stats">
+      <div class="stat"><b id="sMin">0</b><span>ACTIVE MIN TODAY</span></div>
+      <div class="stat"><b id="sKcal">0</b><span>KCAL TODAY</span></div>
+      <div class="stat"><b id="sStreak">0</b><span>DAY STREAK</span></div>
+    </div>
+  </header>
+  <div id="grid"></div>
+</div>
+<div id="setup"><div class="sc">
+  <div class="st">SET UP IN 30 SECONDS</div>
+  <svg viewBox="0 0 640 230" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Set up: TV on the wall, phone standing upright in front of it with its back camera facing you, you standing 6 to 8 feet away">
+  <defs><linearGradient id="fl" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#ffffff10"/><stop offset="1" stop-color="#ffffff02"/></linearGradient>
+  <linearGradient id="cone" x1="0" x2="1"><stop offset="0" stop-color="#66e0ff55"/><stop offset="1" stop-color="#66e0ff08"/></linearGradient></defs>
+  <rect x="0" y="196" width="640" height="34" fill="url(#fl)"/><line x1="0" y1="196" x2="640" y2="196" stroke="#ffffff30"/>
+  <!-- TV -->
+  <rect x="22" y="40" width="20" height="120" rx="4" fill="#0b0918" stroke="#ff7ad9" stroke-width="3"/><rect x="28" y="160" width="8" height="36" fill="#ffffff40"/>
+  <text x="32" y="28" fill="#ff9be3" font-size="17" font-weight="800" text-anchor="middle">TV</text>
+  <!-- phone on a stand, upright, back camera toward the player -->
+  <path d="M110 196 L120 168 L130 196" fill="none" stroke="#ffffff70" stroke-width="3"/>
+  <rect x="112" y="112" width="16" height="58" rx="4" fill="#1d1640" stroke="#fff" stroke-width="3"/><circle cx="126" cy="124" r="3.5" fill="#66e0ff"/>
+  <path d="M130 124 L560 40 L560 196 L130 124 Z" fill="url(#cone)"/>
+  <text x="120" y="94" fill="#fff" font-size="15" font-weight="800" text-anchor="middle">phone upright</text>
+  <text x="120" y="76" fill="#9dffd0" font-size="13" font-weight="700" text-anchor="middle">back camera → you</text>
+  <!-- player -->
+  <g stroke="#fff" stroke-width="5" stroke-linecap="round" fill="none"><circle cx="520" cy="72" r="13"/><line x1="520" y1="86" x2="520" y2="140"/><line x1="520" y1="98" x2="488" y2="124"/><line x1="520" y1="98" x2="552" y2="124"/><line x1="520" y1="140" x2="504" y2="194"/><line x1="520" y1="140" x2="536" y2="194"/></g>
+  <text x="520" y="40" fill="#fff" font-size="15" font-weight="800" text-anchor="middle">you, head to feet in view</text>
+  <!-- distance -->
+  <line x1="140" y1="214" x2="505" y2="214" stroke="#ffd36b" stroke-width="2.5" marker-start="url(#a)" marker-end="url(#a)"/>
+  <defs><marker id="a" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#ffd36b"/></marker></defs>
+  <rect x="270" y="202" width="104" height="24" rx="12" fill="#0b0918"/><text x="322" y="219" fill="#ffd36b" font-size="15" font-weight="800" text-anchor="middle">6 to 8 feet</text>
+</svg>
+  <div class="sl"><b>1</b> Scan the code above with any phone · <b>2</b> Stand it <b>upright</b> in front of the TV, camera facing you · <b>3</b> Step back until the phone sees you head to feet · <b>4</b> Raise both hands</div>
+  <div class="sp"><svg class="seal" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" role="img" aria-label="Privacy guarantee: kept local, you're in control">
+  <defs>
+    <linearGradient id="sealg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#9dffd0"/><stop offset=".5" stop-color="#66e0ff"/><stop offset="1" stop-color="#ff7ad9"/></linearGradient>
+    <path id="sealtop" d="M 36 120 A 84 84 0 0 1 204 120"/>
+    <path id="sealbot" d="M 25 120 A 95 95 0 0 0 215 120"/>
+  </defs>
+  <circle cx="120" cy="120" r="114" fill="#0b0918"/>
+  <circle cx="120" cy="120" r="110" fill="none" stroke="url(#sealg)" stroke-width="6"/>
+  <text font-family="-apple-system,system-ui,sans-serif" font-size="17" font-weight="900" letter-spacing="3.2" fill="#ffffff"><textPath href="#sealtop" startOffset="50%" text-anchor="middle">PRIVACY GUARANTEE</textPath></text>
+  <text font-family="-apple-system,system-ui,sans-serif" font-size="14" font-weight="800" letter-spacing="2.6" fill="#9dffd0"><textPath href="#sealbot" startOffset="50%" text-anchor="middle">YOU'RE IN CONTROL</textPath></text>
+  <g transform="translate(120 90)">
+    <path d="M-17 -6 v-11 a17 17 0 0 1 34 0 v11" fill="none" stroke="url(#sealg)" stroke-width="7" stroke-linecap="round"/>
+    <rect x="-26" y="-7" width="52" height="40" rx="8" fill="url(#sealg)"/>
+    <circle cx="0" cy="10" r="6" fill="#0b0918"/><rect x="-2.5" y="12" width="5" height="12" rx="2" fill="#0b0918"/>
+  </g>
+  <text x="120" y="150" text-anchor="middle" font-family="-apple-system,system-ui,sans-serif" font-size="21" font-weight="900" letter-spacing="1.5" fill="#ffffff">KEPT LOCAL</text>
+</svg><div><b>Our privacy guarantee: kept local, you're in control.</b> Your camera picture stays on your phone. We don't record, save or keep anything about you, and nothing is ever used for training. No sign up. Scores stay on this screen.</div></div>
+  <button id="setupClose">Got it</button>
+</div></div>
+<div id="castwait" class="hide"><div class="cw"><div class="cwt">Connecting to your phone…</div><div class="dots"><span></span><span></span><span></span></div><div class="cws" id="castwaits"></div></div></div>
+<canvas id="hands"></canvas>
+<div id="foot">Raise both hands, then put both hands on a game · <a id="howset" href="#">how to set up</a> · <a id="demo" href="#">watch a demo</a> · 🔒 private: nothing about you is kept</div>
+<script>(function() {
+  const q = new URLSearchParams(location.search), r = (q.get("room") || "").toUpperCase(), ok = /^[A-Z0-9]{4}$/.test(r);
+  try {
+    if (q.has("room") && !ok) {
+      q.delete("room");
+      q.delete("cast");
+      history.replaceState(null, "", location.pathname + (q.toString() ? "?" + q : "") + location.hash);
+    }
+    if (ok && q.get("cast") === "1") {
+      window.BP_CAST = r;
+      sessionStorage.bp_cast = r;
+    } else if (!q.has("room") && sessionStorage.bp_cast && sessionStorage.bp_cast === localStorage.bp_room && document.referrer.startsWith(location.origin + location.pathname.replace(/[^/]*$/, ""))) window.BP_CAST = sessionStorage.bp_cast;
+    else sessionStorage.removeItem("bp_cast");
+  } catch (_) {
+  }
+})();
+</script>
+<script src="body.js"></script>
+<script>BodyMovin.figure = { torso: 0.4, chestY: 0.4, drawReach: true, alpha: 0.32, limb: 1.35 };
+</script>
+<script>addEventListener("DOMContentLoaded", () => {
+  const s = document.getElementById("setup"), hide = () => {
+    s.classList.add("hide");
+    try {
+      localStorage.bp_setup_ok = Date.now();
+    } catch (_) {
+    }
+  };
+  try {
+    if (Date.now() - (+localStorage.bp_setup_ok || 0) < 2 * 36e5) s.classList.add("hide");
+  } catch (_) {
+  }
+  const place = () => {
+    const hd = document.querySelector("header");
+    if (hd) s.style.top = Math.round(hd.getBoundingClientRect().bottom + 6) + "px";
+  };
+  place();
+  addEventListener("resize", place);
+  setTimeout(place, 600);
+  document.getElementById("setupClose").onclick = (e) => {
+    e.stopPropagation();
+    hide();
+  };
+  addEventListener("pointerdown", (e) => {
+    if (!s.classList.contains("hide") && !e.target.closest("#setup .sc")) hide();
+  }, true);
+  document.getElementById("howset").onclick = (e) => {
+    e.preventDefault();
+    s.classList.remove("hide");
+  };
+  addEventListener("keydown", (e) => {
+    if (!s.classList.contains("hide") && (e.key === "Enter" || e.key === "Escape")) {
+      e.stopImmediatePropagation();
+      hide();
+    }
+  }, true);
+  const t = setInterval(() => {
+    if (window.BodyMovin && (BodyMovin.phoneLive || BodyMovin.live) && !BodyMovin.demo) {
+      hide();
+      clearInterval(t);
+    }
+  }, 500);
+});
+</script>
+<script src="qrcode.js"></script>
+<script>const GAMES = [
+  { f: "bowling.html", id: "bowling", ic: "🎳", nm: "Strike Lanes", ds: "Swing your arm, roll a strike", tag: "SPORTS", c: ["#3a1c71", "#d76d77"] },
+  { f: "pingpong.html", id: "pingpong", ic: "🏓", nm: "Table Tennis", ds: "Rally against a real opponent", tag: "SPORTS", c: ["#0f3a78", "#1d6fb8"] },
+  { f: "golf.html", id: "golf", ic: "⛳", nm: "Top Drive", ds: "Target golf party at sunset", tag: "SPORTS", c: ["#3a2a0a", "#f2994a"] },
+  { f: "extreme.html", id: "extreme", ic: "🏂", nm: "Summit Send", ds: "Carve, launch, spin, land it", tag: "EXTREME", c: ["#0d3b66", "#9fd3ff"] },
+  { f: "track.html", id: "track", ic: "🏃", nm: "Track & Field", ds: "Sprint, hurdles, jump, javelin", tag: "SPORTS", c: ["#7a2e0e", "#e0702c"] },
+  { f: "keeper.html", id: "keeper", ic: "🧤", nm: "Goalkeeper", ds: "Dive and block the shots", tag: "SPORTS", c: ["#0c4f2e", "#27a35b"] },
+  { f: "blaster.html", id: "blaster", ic: "🚀", nm: "Star Blaster", ds: "Blast through the nebula", tag: "ACTION", c: ["#0a0a2e", "#7a3cff"] },
+  { f: "gallery.html", id: "gallery", ic: "🎯", nm: "Peekaboo Gallery", ds: "Peek, aim and knock down ducks", tag: "ACTION", c: ["#4a1a08", "#f2a33a"] },
+  { f: "wolfstrike.html", id: "wolfstrike", ic: "🐺", nm: "Wolf Strike", ds: "Rescue the hostages, spare the civilians", tag: "ACTION", c: ["#1c2412", "#9a8a3a"] },
+  { f: "boxing.html", id: "boxing", ic: "🥊", nm: "Bop Boxing", ds: "Punch and kick a heavy bag, or a speed bag", tag: "FITNESS", c: ["#5c0f1f", "#e2394f"] },
+  { f: "starjumps.html", id: "starjumps", ic: "⭐", nm: "Star Jumps Coach", ds: "A 90-second HIIT circuit", tag: "FITNESS", c: ["#5a3d00", "#f0b429"] },
+  { f: "walls.html", id: "walls", ic: "🧱", nm: "Wall Dodge", ds: "Squat, jump and lean through", tag: "FITNESS", c: ["#1b1b4f", "#5a5ae6"] },
+  { f: "runner.html", id: "runner", ic: "🌌", nm: "Sky Runner", ds: "Run, jump and duck the sky path", tag: "FITNESS", c: ["#0b2a4a", "#3a8dde"] },
+  { f: "fruit.html", id: "fruit", ic: "🍉", nm: "Fruit Slash", ds: "Slice fruit, dodge bombs", tag: "ARCADE", c: ["#145a32", "#e74c3c"] },
+  { f: "moles.html", id: "moles", ic: "🔨", nm: "Whack-a-Mole", ds: "Bonk them all, spare the bunny", tag: "ARCADE", c: ["#4a2c0a", "#8bc34a"] },
+  { f: "breaker.html", id: "breaker", ic: "🧨", nm: "Body Breaker", ds: "Your body is the paddle", tag: "ARCADE", c: ["#2b0a3d", "#ff3cac"] },
+  { f: "climber.html", id: "climber", ic: "🦍", nm: "Girder King", ds: "Jog, jump and climb to the top", tag: "ARCADE", c: ["#1a0505", "#e5413a"] },
+  { f: "airband.html", id: "airband", ic: "🎸", nm: "Air Band Live", ds: "Rock the arena with your body", tag: "MUSIC", c: ["#2a0a3a", "#ff3c6e"] },
+  { f: "posematch.html", id: "posematch", ic: "💃", nm: "Pose Party", ds: "Strike the pose on the beat", tag: "DANCE", c: ["#4b0f5c", "#c86dd7"] },
+  { f: "balloon.html", id: "balloon", ic: "🎈", nm: "Balloon Keep-Up", ds: "Never let them touch the floor", tag: "KIDS", c: ["#0e4d64", "#f06292"] },
+  { f: "bubbles.html", id: "bubbles", ic: "🫧", nm: "Bubble Pop", ds: "Gentle popping music", tag: "KIDS", c: ["#12355b", "#5ec5f5"] },
+  { f: "soundbath.html", id: "soundbath", ic: "🔔", nm: "Sound Bath", ds: "Play gongs and bowls with your hands", tag: "CALM", c: ["#3b2412", "#c98a3a"] },
+  { f: "painter.html", id: "painter", ic: "🎨", nm: "Sky Painter", ds: "Paint the night sky with light", tag: "CALM", c: ["#0a0f2c", "#6a5cf0"] }
+];
+const grid = document.getElementById("grid"), tiles = [];
+const keep = new URLSearchParams(location.search).has("demo") ? "?demo=1" : "";
+for (const g of GAMES) {
+  const a = document.createElement("a");
+  a.className = "tile";
+  a.href = g.f + keep;
+  a.tabIndex = 0;
+  a.style.setProperty("--c1", g.c[0]);
+  a.style.setProperty("--c2", g.c[1]);
+  const best = 0;
+  a.innerHTML = '<span class="pic"></span><span class="shine"></span><span class="tag">'.concat(g.tag, "</span>").concat(best ? '<span class="best">best '.concat(best, "</span>") : "", '<span class="ic">').concat(g.ic, '</span><span class="nm">').concat(g.nm, '</span><span class="ds">').concat(g.ds, '</span><span class="fill"></span>');
+  grid.appendChild(a);
+  tiles.push({ el: a, g });
+  {
+    const im = new Image();
+    im.onload = () => {
+      a.querySelector(".pic").style.backgroundImage = "url(".concat(im.src, ")");
+      a.classList.add("haspic");
+    };
+    im.src = "assets/tiles/" + g.id + ".jpg";
+  }
+  fetch(g.f, { method: "HEAD" }).then((r) => {
+    if (!r.ok) a.classList.add("off");
+  }).catch(() => a.classList.add("off"));
+}
+document.getElementById("demo").href = keep ? "index.html" : "index.html?demo=1";
+document.getElementById("demo").textContent = keep ? "stop the demo player" : "watch a demo player";
+const t = BodyMovin.today();
+document.getElementById("sMin").textContent = Math.round(t.minutes);
+document.getElementById("sKcal").textContent = Math.round(t.kcal);
+document.getElementById("sStreak").textContent = t.streak;
+const connt = document.getElementById("connt"), qr = document.getElementById("qr");
+function drawQR(text) {
+  const q = qrcode(0, "M");
+  q.addData(text);
+  q.make();
+  const n = q.getModuleCount(), c = qr.getContext("2d"), s = qr.width / n;
+  c.fillStyle = "#fff";
+  c.fillRect(0, 0, qr.width, qr.height);
+  c.fillStyle = "#000";
+  for (let r = 0; r < n; r++) for (let k = 0; k < n; k++) if (q.isDark(r, k)) c.fillRect(Math.floor(k * s), Math.floor(r * s), Math.ceil(s), Math.ceil(s));
+}
+if (BodyMovin.online) {
+  if (!localStorage.bp_room) {
+    const A = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    localStorage.bp_room = Array.from({ length: 4 }, () => A[Math.floor(Math.random() * A.length)]).join("");
+    location.reload();
+  }
+  const url = "".concat(location.origin).concat(location.pathname.replace(/[^/]*$/, ""), "phone.html?room=").concat(localStorage.bp_room, "&v=").concat(Date.now().toString(36));
+  drawQR(url);
+  connt.innerHTML = "Scan with your phone's camera (iPhone or Android)<br>or on the phone go to <b>".concat(location.host, '/play/join</b><br>and type <span class="code">').concat(localStorage.bp_room, "</span>");
+} else {
+  qr.style.display = "none";
+}
+const castEl = document.getElementById("castwait");
+if (window.BP_CAST && BodyMovin.online && !BodyMovin.demo) {
+  document.getElementById("setup").classList.add("hide");
+  qr.style.display = "none";
+  connt.innerHTML = "Connecting to your phone…";
+  document.getElementById("castwaits").innerHTML = "room <b>".concat(BP_CAST, "</b>");
+  if (!(BodyMovin.phoneLive || BodyMovin.live)) castEl.classList.remove("hide");
+  const t0 = Date.now(), ct = setInterval(() => {
+    if (BodyMovin.phoneLive || BodyMovin.live) {
+      castEl.classList.add("hide");
+      clearInterval(ct);
+      return;
+    }
+    if (Date.now() - t0 > 4e4) {
+      castEl.classList.add("hide");
+      qr.style.display = "";
+      connt.innerHTML = "Still waiting? Scan this with your phone<br>or go to <b>".concat(location.host, '/play/join</b> and type <span class="code">').concat(BP_CAST, "</span>");
+      clearInterval(ct);
+    }
+  }, 300);
+}
+function connStatus() {
+  if (BodyMovin.demo) return "demo player ✓";
+  if (BodyMovin.phoneLive || BodyMovin.live) {
+    const l = BodyMovin.latency();
+    return l !== null && l > 150 ? '<b>Phone connected ✓</b><br><span style="color:#ffd36b">a little slow: put both on the same Wi-Fi</span>' : "<b>Phone connected ✓</b>";
+  }
+  if (BodyMovin.online) return null;
+  return BodyMovin.fromPhone ? "step back so your phone can see you" : "waiting for the phone…";
+}
+BodyMovin.start();
+BodyMovin.musicBtnStyle = "top:auto;bottom:max(10px,1.8vmin);left:max(10px,1.8vmin);width:max(36px,5.6vmin);height:max(36px,5.6vmin);min-width:0;min-height:0;border:1px solid rgba(255,255,255,.18);background:rgba(10,12,24,.55);color:#fff;opacity:1";
+BodyMovin.onMusic(() => {
+});
+function hubMusic() {
+  const t2 = BodyMovin.music("hub", 0.1);
+  if (!t2 || !t2.paused) return;
+  t2.play().then(() => {
+    t2.volume = BodyMovin.musicOff ? 0 : 0.05;
+  }).catch(() => {
+  });
+}
+["pointerdown", "keydown", "touchstart"].forEach((ev) => addEventListener(ev, hubMusic, { passive: true }));
+setInterval(() => {
+  if (BodyMovin.phoneLive || BodyMovin.live) hubMusic();
+}, 1e3);
+const hc = document.getElementById("hands"), hx = hc.getContext("2d");
+const beta = document.createElement("div");
+beta.id = "beta";
+beta.innerHTML = '<b>🛠 Brand new: just a few days old</b><span>Some games are still glitchy, and we improve them every day. Got a tip or found a bug? Email <a href="mailto:info@nicedreamzwholesale.com">info@nicedreamzwholesale.com</a></span>';
+function navCell(dir) {
+  const a = document.createElement("a");
+  a.className = "tile nav";
+  a.href = "#";
+  a.tabIndex = 0;
+  a.innerHTML = '<span class="ar">'.concat(dir > 0 ? "▶" : "◀", '</span><span class="nm">').concat(dir > 0 ? "MORE GAMES" : "BACK", '</span><span class="ds"></span><span class="fill"></span>');
+  a.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    showPage(page + dir, dir > 0 ? "first" : "last");
+  });
+  grid.appendChild(a);
+  return a;
+}
+const moreEl = navCell(1), backEl = navCell(-1);
+grid.insertBefore(backEl, grid.firstChild);
+grid.appendChild(beta);
+let pages = [], page = 0, layoutKey = "";
+function paginate() {
+  const tall = innerHeight > innerWidth * 1.15, cols = tall ? 2 : 4, rows = tall ? 5 : 3, per = cols * rows, key = cols + "x" + rows;
+  if (key === layoutKey) return;
+  layoutKey = key;
+  grid.style.setProperty("--cols", cols);
+  grid.style.setProperty("--rows", rows);
+  const cur = pages[page] && pages[page].games[0];
+  pages = [];
+  let i = 0;
+  while (i < tiles.length) {
+    const p = pages.length, back = p > 0;
+    let n = per - (back ? 1 : 0);
+    const more = tiles.length - i > n;
+    if (more) n--;
+    pages.push({ back, more, games: tiles.slice(i, i + n), cols, per });
+    i += n;
+  }
+  const pi = cur ? pages.findIndex((p) => p.games.includes(cur)) : 0;
+  showPage(Math.max(0, pi), null);
+}
+function showPage(p, focus) {
+  page = Math.max(0, Math.min(pages.length - 1, p));
+  const P = pages[page];
+  for (const t2 of tiles) t2.el.classList.toggle("pg-off", !P.games.includes(t2));
+  backEl.classList.toggle("pg-off", !P.back);
+  moreEl.classList.toggle("pg-off", !P.more);
+  moreEl.querySelector(".ds").textContent = "page ".concat(page + 1, " of ").concat(pages.length);
+  backEl.querySelector(".ds").textContent = "page ".concat(page + 1, " of ").concat(pages.length);
+  const used = (P.back ? 1 : 0) + P.games.length + (P.more ? 1 : 0), left = P.per - used;
+  beta.classList.toggle("pg-off", P.more || left < 1);
+  beta.style.setProperty("--span", Math.max(1, Math.min(P.cols, left)));
+  beta.classList.toggle("narrow", left < 2);
+  if (window.BodyMovin && BodyMovin.disarmAll) BodyMovin.disarmAll();
+  if (focus) {
+    const c = cells();
+    (focus === "first" ? c[P.back ? 1 : 0] : c[c.length - (P.more ? 2 : 1)] || c[0]).focus();
+  }
+}
+const cells = () => [backEl, ...pages[page].games.map((t2) => t2.el), moreEl].filter((el) => !el.classList.contains("pg-off"));
+addEventListener("keydown", (e) => {
+  const c = cells(), cols = pages[page].cols;
+  let i = c.indexOf(document.activeElement);
+  if (!["ArrowRight", "ArrowLeft", "ArrowDown", "ArrowUp"].includes(e.key)) return;
+  e.preventDefault();
+  if (i < 0) {
+    c[pages[page].back ? 1 : 0].focus();
+    return;
+  }
+  if (e.key === "ArrowRight") {
+    if (i + 1 < c.length) c[i + 1].focus();
+    else if (page + 1 < pages.length) showPage(page + 1, "first");
+  } else if (e.key === "ArrowLeft") {
+    if (i > 0) c[i - 1].focus();
+    else if (page > 0) showPage(page - 1, "last");
+  } else if (e.key === "ArrowDown") {
+    if (i + cols < c.length) c[i + cols].focus();
+    else if (page + 1 < pages.length) showPage(page + 1, "first");
+    else c[c.length - 1].focus();
+  } else if (e.key === "ArrowUp") {
+    if (i - cols >= 0) c[i - cols].focus();
+    else if (page > 0) showPage(page - 1, "last");
+  }
+});
+addEventListener("wheel", (e) => {
+  if (Math.abs(e.deltaY) > 20 && !wheelLock) {
+    wheelLock = true;
+    setTimeout(() => wheelLock = false, 500);
+    showPage(page + Math.sign(e.deltaY), null);
+  }
+}, { passive: true });
+let wheelLock = false;
+paginate();
+addEventListener("resize", paginate);
+const setupEl = document.getElementById("setup"), gotIt = document.getElementById("setupClose");
+function frame(now) {
+  BodyMovin.update(now);
+  const W = hc.width = innerWidth * Math.min(2, devicePixelRatio), H = hc.height = innerHeight * Math.min(2, devicePixelRatio);
+  hx.clearRect(0, 0, W, H);
+  const s = connStatus();
+  if (s !== null && connt.dataset.s !== s) {
+    connt.dataset.s = s;
+    if (!BodyMovin.online || (BodyMovin.phoneLive || BodyMovin.live)) connt.innerHTML = s;
+  }
+  const k = Math.min(2, devicePixelRatio), setupUp = !setupEl.classList.contains("hide");
+  if (setupUp) {
+    const r = gotIt.getBoundingClientRect(), over = BodyMovin.handsOver({ x: r.left * k, y: r.top * k, w: r.width * k, h: r.height * k }, W, H) > 0;
+    const f = BodyMovin.dwell("setup-gotit", over, now, 900);
+    gotIt.style.boxShadow = over ? "inset ".concat(Math.round(f * r.width), "px 0 0 #ffffff55, 0 0 0 3px #fff") : "none";
+    if (f === 1) gotIt.click();
+  }
+  for (const nv of [moreEl, backEl]) {
+    if (setupUp || nv.classList.contains("pg-off")) {
+      nv.classList.remove("hot");
+      continue;
+    }
+    const r = nv.getBoundingClientRect(), over = BodyMovin.handsOver({ x: r.left * k, y: r.top * k, w: r.width * k, h: r.height * k }, W, H) > 0;
+    const fill = BodyMovin.dwell(nv === moreEl ? "page-more" : "page-back", over, now, 1e3);
+    nv.classList.toggle("hot", over);
+    nv.querySelector(".fill").style.width = "".concat(Math.round(fill * 100), "%");
+    if (fill === 1) {
+      nv.querySelector(".fill").style.width = "0%";
+      nv.click();
+    }
+  }
+  for (const tl of tiles) {
+    if (setupUp || tl.el.classList.contains("pg-off")) {
+      tl.el.classList.remove("hot");
+      tl.el.querySelector(".fill").style.width = "0%";
+      continue;
+    }
+    const r = tl.el.getBoundingClientRect();
+    const nOn = tl.el.classList.contains("off") ? 0 : BodyMovin.handsOver({ x: r.left * k, y: r.top * k, w: r.width * k, h: r.height * k }, W, H);
+    const over = nOn >= (BodyMovin.mouse || BodyMovin.simulating ? 1 : 2);
+    const fill = BodyMovin.dwell(tl.g.id, over, now, 2e3);
+    tl.el.classList.toggle("hot", over);
+    tl.el.querySelector(".fill").style.width = "".concat(Math.round(fill * 100), "%");
+    if (fill === 1) location.href = tl.el.href;
+  }
+  BodyMovin.drawHands(hx, W, H, 0.8);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+window.__hub = { tiles, GAMES, cast: window.BP_CAST || null, get page() {
+  return page;
+}, get pages() {
+  return pages.length;
+}, showPage };
+</script>
+</body>
+</html>

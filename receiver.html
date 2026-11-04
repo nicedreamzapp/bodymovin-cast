@@ -1,0 +1,100 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Body Movin' (TV)</title>
+<!-- Body Movin' Google Cast Web Receiver for RELEASE builds (11/03). Static: no server of ours, no player data stored,
+     no analytics. Built with the game into one folder by tools/cast/build_receiver.mjs; the only outside file is
+     Google's Cast receiver framework below, which every Cast receiver must load (it runs on the Chromecast itself).
+     The phone (sender) talks to this page over the Cast channel urn:x-cast:com.nicedreamz.bodymovin, a direct socket
+     from the phone to the Chromecast on the home Wi-Fi:
+       phone -> TV  {"room":"ABCD"}                open the TV screen (index.html?room=ABCD&cast=1) in the iframe
+       phone -> TV  {"b": <body frame>}             one body frame (the same JSON the phone's :8081 socket carries)
+       phone -> TV  {"type":"thumb","jpg":base64}   one small camera picture for the game's corner box
+       TV -> phone  {"type":"hello","video":bool}   the game on screen, and whether it shows the camera picture
+       TV -> phone  {"ok":true,"room":"ABCD"}       answer to a room message
+     WHY AN IFRAME: the game moves between pages (home -> bowling.html -> home); if this document navigated away the
+     Cast SDK and the sender channel would go with it. Frames go into the iframe with postMessage (body.js CAST FEED). -->
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: radial-gradient(120% 90% at 50% 0%, #1d1640 0%, #0b0918 55%, #05040b 100%); color: #fff; font-family: -apple-system, system-ui, 'Segoe UI', Roboto, sans-serif; }
+  #splash { position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+  #splash h1 { margin: 0; font-weight: 200; letter-spacing: .3em; font-size: 6vmin; }
+  #splash h1 b { font-weight: 800; color: #ff9be6; }
+  #splash p { margin-top: 3vmin; font-size: 3vmin; color: #ffffffb0; }
+  #game { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0; display: none; background: #05040b; }
+  body.on #game { display: block; } body.on #splash { display: none; }
+</style>
+</head>
+<body>
+<div id="splash"><h1>BODY <b>MOVIN'</b></h1><p id="msg">Getting ready… keep your phone open on Body Movin'</p></div>
+<iframe id="game" allow="autoplay; fullscreen" title="Body Movin'"></iframe>
+<script>window.BP_TV = true; try { sessionStorage.bp_tv = '1'; } catch (e) {}</script>
+<script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
+<script>
+(function () {
+  'use strict';
+  var NS = 'urn:x-cast:com.nicedreamz.bodymovin';
+  var ROOM_OK = /^[A-Z0-9]{4}$/;
+  var frame = document.getElementById('game');
+  var room = null, ctx = null, hello = null, frames = 0;
+  var st = window.__cast = { room: null, sdk: false, frames: 0, hello: null };
+  function parse(d) { if (typeof d === 'string') { try { return JSON.parse(d); } catch (e) { return null; } } return d; }
+  function roomFrom(d) { var r = d && typeof d.room === 'string' ? d.room.trim().toUpperCase() : ''; return ROOM_OK.test(r) ? r : null; }
+  function toGame(m) { try { frame.contentWindow.postMessage(m, location.origin); } catch (e) {} }
+  function toPhone(m, senderId) { if (!ctx) return; try { ctx.sendCustomMessage(NS, senderId, m); } catch (e) {} }
+  function openRoom(r) {
+    if (!r) return false;
+    if (r !== room) {
+      room = st.room = r;
+      frame.src = 'index.html?room=' + r + '&cast=1&tvmode=1&castfeed=1';
+      document.body.classList.add('on');
+    }
+    return true;
+  }
+  function onPhone(d, senderId) {
+    d = parse(d); if (!d || typeof d !== 'object') return;
+    if (d.b && typeof d.b === 'object') { frames++; st.frames = frames; toGame(d.b); return; }
+    if (d.type === 'thumb') { toGame(d); return; }
+    if ('room' in d) {
+      var ok = openRoom(roomFrom(d));
+      toPhone(ok ? { ok: true, room: room } : { ok: false, error: 'bad room' }, senderId);
+      if (ok && hello) toPhone(hello, senderId);
+    }
+  }
+  // the game page (any page inside the iframe) says hello: tell every phone whether to send camera pictures
+  window.addEventListener('message', function (e) {
+    if (e.source !== frame.contentWindow || e.origin !== location.origin) return;
+    var m = e.data;
+    if (m && m.type === 'hello') { hello = st.hello = { type: 'hello', video: !!m.video }; toPhone(hello, undefined); }
+  });
+  window.__castTest = { onPhone: onPhone };   // the headless test drives the same function the Cast channel calls
+  // manual / test: receiver.html?room=ABCD opens straight away
+  openRoom(roomFrom({ room: new URLSearchParams(location.search).get('room') || '' }));
+
+  if (window.cast && cast.framework) {
+    ctx = cast.framework.CastReceiverContext.getInstance();
+    ctx.addCustomMessageListener(NS, function (e) { onPhone(e.data, e.senderId); });
+    var pm = ctx.getPlayerManager && ctx.getPlayerManager();
+    if (pm && cast.framework.messages) {
+      pm.setMessageInterceptor(cast.framework.messages.MessageType.LOAD, function (req) {
+        var r = roomFrom(parse(req && req.customData)) || roomFrom(parse(req && req.media && req.media.customData));
+        openRoom(r);
+        var M = cast.framework.messages;   // nothing to play: answer so the sender never waits (the game is open)
+        return new M.ErrorData(r ? M.ErrorType.LOAD_CANCELLED : M.ErrorType.LOAD_FAILED);
+      });
+    }
+    var opts = new cast.framework.CastReceiverOptions();
+    opts.disableIdleTimeout = true;      // not a media app: never close because nothing is "playing"
+    opts.skipPlayersLoad = true;         // no video players: faster start, more memory for the WebGL games
+    opts.customNamespaces = {}; opts.customNamespaces[NS] = cast.framework.system.MessageType.JSON;
+    opts.statusText = "Body Movin'";
+    ctx.start(opts);
+    st.sdk = true;
+  } else {
+    document.getElementById('msg').textContent = 'Open Body Movin’ on your phone and tap Cast';
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,1418 @@
+<!doctype html>
+<html>
+<head>
+<script src="_lg/polyfills.js"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Sound Bath</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #060403; overflow: hidden; font-family: -apple-system, system-ui, sans-serif; touch-action: none; user-select: none; -webkit-user-select: none; }
+  canvas { display: block; }
+  #gl { position: fixed; top:0;right:0;bottom:0;left:0; width: 100%; height: 100%; z-index: 0; }
+  #c { position: fixed; top:0;right:0;bottom:0;left:0; width: 100%; height: 100%; z-index: 1; }
+  /* UI spec 10/19: system row top-left (HOME, MENU, pause). BODY-UI-PLAN fix 11: the four sound toggles were four hand
+     targets 8 px apart next to that row; now ONE "SOUNDS" button top-right opens a pick screen (BodyMovin.pick). The
+     toggle buttons stay in the page, hidden, as the on/off state the pick reads and clicks. */
+  :root { --L: max(10px,1.8vmin); --Hh: max(36px,5.6vmin); --Wb: max(108px,15vmin); --G: max(8px,1.2vmin); }
+  #top { display: none !important; }
+  #sounds { position: fixed; z-index: 9; top: max(1.6vmin, env(safe-area-inset-top)); right: max(1.6vmin, env(safe-area-inset-right)); box-sizing: border-box; cursor: pointer;
+            min-width: max(150px, 22vmin); height: max(66px, 12vmin); padding: 0 max(16px, 2.6vmin); border-radius: 999px; border: 1px solid rgba(255,255,255,.3);
+            background: rgba(10,12,24,.55); color: #fff; font: 800 max(16px, 2.4vmin) -apple-system, system-ui, sans-serif; letter-spacing: .1em; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .4vmin;
+            -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+  #sounds .sub { font-size: max(11px, 1.6vmin); letter-spacing: .12em; opacity: .75; font-weight: 700; }
+  /* upright phone: the top row fills the width, so SOUNDS sits under it at the right, a hand of space below it */
+  @media (max-aspect-ratio: 1/1) { #sounds { top: calc(max(1.6vmin, env(safe-area-inset-top)) + max(60px, 8vmin) + max(56px, 13vmin)); } }
+  #top button { position: relative; pointer-events: auto; cursor: pointer; height: var(--Hh); padding: 0 max(14px,2.4vmin); border-radius: 999px; border: 1px solid rgba(255,255,255,.18);
+                background: rgba(10,12,24,.55); color: #fff; font: 800 max(14px,1.9vmin) -apple-system, system-ui, sans-serif; letter-spacing: .06em; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); transition: background .4s, box-shadow .4s; }
+  #top button { background-image: linear-gradient(90deg, #ffcf8a66 var(--p, 0%), transparent var(--p, 0%)); }
+  #top button.on { background-color: rgba(255,190,110,.32); border-color: #ffd9a0aa; box-shadow: 0 0 20px #ffb35a55; }
+  /* narrow screens (phone): the toggles move to their own row under the system row */
+  #hint { position: fixed; bottom: calc(var(--L) + 2vmin); left: 50%; transform: translateX(-50%); padding: .5em 1.2em; border-radius: 999px; background: rgba(10,12,24,.55); white-space: nowrap;
+          color: #fff; font: 700 max(16px,2.6vmin) -apple-system, system-ui, sans-serif; transition: opacity 2s; pointer-events: none; }
+  body:not(.on) #sounds, body:not(.on) #hint { display: none; }   /* nothing but the start screen until START */
+  #start { position: fixed; top:0;right:0;bottom:0;left:0; background: none; color: #ffe6c4; cursor: pointer; z-index: 5; }   /* 10/23 Matt: nothing dims the room */
+  /* during the session body.js's music switch (when the page has one) owns the top-right corner: SOUNDS sits just left of it */
+  html[data-bp-mode=play]:has(#bp-music) #sounds { right: calc(max(1.6vmin, env(safe-area-inset-right)) + max(76px,11vmin) + max(12px,2vmin)); }
+  #start .t, #start .s { display: none; }
+  [data-hover] { overflow: hidden; }
+  [data-hover]::after { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: var(--p, 0%); background: #ffffff45; pointer-events: none; }
+  [data-hover].hov { border-color: #ffffffdd !important; box-shadow: 0 0 18px #ffffff55; }
+  /* START: one big button under the how-to card, above the bottom band body.js keeps for its "raise both hands" prompt */
+  /* START at least 0.40 x 0.16 of the short side (BODY-UI-PLAN rule 3), still above the engine's bottom prompt line */
+  #go { position: fixed; left: 50%; top: 69vh; transform: translateX(-50%); box-sizing: border-box; height: max(70px, 16vmin); width: max(240px, min(44vmin, 80vw)); cursor: pointer;
+        border-radius: 999px; border: 1px solid #ffd9a0aa; background: rgba(255,190,110,.22); color: #fff; font: 800 max(18px,4vmin) -apple-system, system-ui, sans-serif; letter-spacing: .12em; }
+  /* phone (portrait): when the live camera view is showing on the right edge, the how-to card sits left of it */
+  @media (max-width: 600px) { body:has(#bp-cam) .bph-wrap:not(.bph-mounted) { right: calc(max(90px,15vmin) + 1.4vmin + max(8px,1.2vmin)) !important; left: max(10px,1.8vmin) !important; }
+                              body:has(#bp-cam) .bph-wrap:not(.bph-mounted) .bph-card { width: 100% !important; max-width: none !important; }
+                              body:has(#bp-cam) .bph-wrap:not(.bph-mounted) .bph-txt { font-size: 5vw !important; } body:has(#bp-cam) .bph-wrap:not(.bph-mounted) .bph-title { font-size: 9vw !important; } }
+</style>
+<script src="body.js"></script>
+<script src="howto.js"></script>
+<script>window.BP_DIR = "";
+if (BP_DIR && BodyMovin.demo) {
+  const f0 = window.fetch.bind(window);
+  window.fetch = (u, o) => f0(typeof u === "string" && /(^|\/)demo_body\.jsonl$/.test(u) ? BP_DIR + "demo_body.jsonl" : u, o);
+}
+window.NoMouse = /* @__PURE__ */ (function() {
+  let cv = null;
+  const visible = (el) => el.getClientRects().length && getComputedStyle(el).visibility !== "hidden";
+  function tick(now, showHands) {
+    for (const el of document.querySelectorAll("[data-hover]")) {
+      const id = el.dataset.dwell || "nm-" + (el.id || el.dataset.hover || el.textContent);
+      if (!visible(el) || el.closest("#bp-sys") && BodyMovin.sysMode && BodyMovin.sysMode() === "play") {
+        if (el._nmVis !== false) {
+          el._nmVis = false;
+          BodyMovin.dwell(id, false, now);
+          el.classList.remove("hov");
+          el.style.setProperty("--p", "0%");
+        }
+        continue;
+      }
+      el._nmVis = true;
+      const r = el.getBoundingClientRect(), pad = 0;
+      const over = (BodyMovin.live || BodyMovin.mouse) && BodyMovin.handOver({ x: r.left - pad, y: r.top - pad, w: r.width + pad * 2, h: r.height + pad * 2 }, innerWidth, innerHeight);
+      const k = BodyMovin.dwell(id, over, now, +(el.dataset.ms || 900));
+      el.style.setProperty("--p", Math.round(k * 100) + "%");
+      el.classList.toggle("hov", !!over);
+      if (k >= 1) {
+        el.style.setProperty("--p", "0%");
+        el.click();
+      }
+    }
+    if (!cv) {
+      cv = document.createElement("canvas");
+      cv.id = "nm-hands";
+      cv.style.cssText = "position:fixed;top:0;right:0;bottom:0;left:0;width:100%;height:100%;pointer-events:none;z-index:20";
+      document.body.appendChild(cv);
+    }
+    const dpr = Math.min(2, devicePixelRatio || 1), W = Math.round(innerWidth * dpr), H = Math.round(innerHeight * dpr);
+    if (cv.width !== W || cv.height !== H) {
+      cv.width = W;
+      cv.height = H;
+    }
+    const c = cv.getContext("2d");
+    c.clearRect(0, 0, W, H);
+    if (showHands) BodyMovin.drawHands(c, W, H, 0.8);
+  }
+  return { tick };
+})();
+</script>
+<script>BodyMovin.selfView = { x: 0.955, y: 0.99, h: 0.25 };
+</script>
+<script>BodyMovin.realSelf = { view: "mirror", outfit: "casual", ghost: "mountain" };
+</script>
+
+</head>
+<body>
+<canvas id="c"></canvas>
+<a id="bpHome" data-hover data-dwell="bp-home" data-ms="1200" href="index.html">← HOME</a>
+<!-- ONE top-left system row (HOME, then body.js's MENU, music and pause), its look from body.js: the old HOME sat 12 px
+     from MENU at a different size (BODY-UI-PLAN fix 11) -->
+<div id="bp-sys" data-home="bpHome"></div>
+<script>(function() {
+  const row = document.getElementById("bp-sys");
+  const adopt = () => {
+    const home = document.getElementById(row.dataset.home), menu = document.getElementById("bp-menu"), mus = document.getElementById("bp-music"), pz = document.getElementById("bp-pause");
+    for (const e of [home, menu, mus]) if (e && e.parentElement !== row) row.appendChild(e);
+    if (home && row.firstChild !== home) row.insertBefore(home, row.firstChild);
+    if (menu && mus && menu.nextSibling !== mus) row.insertBefore(mus, menu.nextSibling);
+    if (pz && pz.parentElement === row && row.lastElementChild !== pz) row.appendChild(pz);
+  };
+  new MutationObserver(adopt).observe(document.body, { childList: true });
+  new MutationObserver(adopt).observe(row, { childList: true });
+  addEventListener("DOMContentLoaded", adopt);
+  setTimeout(adopt, 0);
+})();
+</script>
+<button id="sounds" data-hover data-ms="1100"><span>♪ SOUNDS</span><span class="sub">change</span></button>
+<div id="top"><button id="drone">DRONE</button><button id="breath">BREATHE</button><button id="rain">RAIN</button><button id="ocean">OCEAN</button></div>
+<div id="hint">Swing a hand into any instrument</div>
+<div id="start"><button id="go" data-hover data-ms="800">START</button></div>
+<script>BodyMovin.howTo({
+  title: "SOUND BATH",
+  corner: false,
+  top: (1.6 * Math.min(innerWidth, innerHeight) / 100 + Math.max(60, 8 * Math.min(innerWidth, innerHeight) / 100)) / innerHeight + 0.02,
+  bottom: 0.66,
+  moves: [{ anim: "swipe", text: "Swing a hand into an instrument to strike it" }, { anim: "circle", text: "Circle a hand inside a bowl to make it sing" }]
+});
+</script>
+<script>const FROM_PHONE = location.port === "8080", ONLINE = location.pathname.startsWith("/play/");
+if (new URLSearchParams(location.search).get("room")) localStorage.bp_room = new URLSearchParams(location.search).get("room").toUpperCase();
+const BODY_WS = FROM_PHONE ? "ws://".concat(location.hostname, ":8081") : ONLINE ? "".concat(location.protocol === "https:" ? "wss" : "ws", "://").concat(location.host, "/play/relay?room=").concat(localStorage.bp_room || "", "&role=tv") : "ws://localhost:8794";
+const cv = document.getElementById("c");
+let ctx = cv.getContext("2d");
+let W, H, DPR = Math.min(2, devicePixelRatio), S;
+function size() {
+  W = cv.width = innerWidth * DPR;
+  H = cv.height = innerHeight * DPR;
+  S = Math.min(W / 1600, H / 1e3);
+  layout();
+}
+let ac, master, dry, verbIn, noiseBuf;
+for (const ev of ["pointerdown", "keydown", "touchstart", "click"]) addEventListener(ev, () => {
+  if (ac && ac.state !== "running") ac.resume().catch(() => {
+  });
+}, true);
+function audioInit() {
+  if (ac) {
+    if (ac.state !== "running") ac.resume().catch(() => {
+    });
+    return;
+  }
+  ac = new (window.AudioContext || window.webkitAudioContext)();
+  if (ac.state !== "running") ac.resume().catch(() => {
+  });
+  master = ac.createGain();
+  master.gain.value = 0.8;
+  const comp = ac.createDynamicsCompressor();
+  comp.threshold.value = -16;
+  comp.ratio.value = 3;
+  comp.attack.value = 0.02;
+  comp.release.value = 0.4;
+  master.connect(comp);
+  comp.connect(ac.destination);
+  const len = ac.sampleRate * 7, ir = ac.createBuffer(2, len, ac.sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const d = ir.getChannelData(ch);
+    let lp = 0;
+    for (let i = 0; i < len; i++) {
+      lp += 0.35 * (Math.random() * 2 - 1 - lp);
+      d[i] = lp * Math.pow(1 - i / len, 2.2) * 1.6;
+    }
+  }
+  const verb = ac.createConvolver();
+  verb.buffer = ir;
+  verbIn = ac.createGain();
+  const wet = ac.createGain();
+  wet.gain.value = 0.55;
+  dry = ac.createGain();
+  dry.gain.value = 0.75;
+  verbIn.connect(verb);
+  verb.connect(wet);
+  wet.connect(master);
+  dry.connect(master);
+  noiseBuf = ac.createBuffer(1, ac.sampleRate * 4, ac.sampleRate);
+  const nd = noiseBuf.getChannelData(0);
+  for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+}
+let curLevel = 1;
+function out(pan = 0, send = 1) {
+  const g = ac.createGain(), p = ac.createStereoPanner();
+  g.gain.value = curLevel;
+  p.pan.value = Math.max(-1, Math.min(1, pan));
+  const s = ac.createGain();
+  s.gain.value = send;
+  g.connect(p);
+  p.connect(dry);
+  p.connect(s);
+  s.connect(verbIn);
+  return g;
+}
+function partial(dest, f, amp, t, attack, decay, detune = 0) {
+  const o = ac.createOscillator(), g = ac.createGain();
+  o.frequency.value = f;
+  o.detune.value = detune;
+  g.gain.setValueAtTime(1e-4, t);
+  g.gain.exponentialRampToValueAtTime(Math.max(2e-4, amp), t + attack);
+  g.gain.exponentialRampToValueAtTime(1e-4, t + attack + decay);
+  o.connect(g);
+  g.connect(dest);
+  o.start(t);
+  o.stop(t + attack + decay + 0.1);
+  return o;
+}
+function noise(dest, t, len, type, freq, q, amp, attack = 2e-3) {
+  const n = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain();
+  n.buffer = noiseBuf;
+  n.loop = true;
+  f.type = type;
+  f.frequency.value = freq;
+  f.Q.value = q;
+  g.gain.setValueAtTime(1e-4, t);
+  g.gain.exponentialRampToValueAtTime(amp, t + attack);
+  g.gain.exponentialRampToValueAtTime(1e-4, t + len);
+  n.connect(f);
+  f.connect(g);
+  g.connect(dest);
+  n.start(t, Math.random() * 3);
+  n.stop(t + len + 0.05);
+}
+const SOUNDS = {
+  crystal(inst, vel) {
+    const t = ac.currentTime, o = out(inst.pan, 1), f = inst.f;
+    partial(o, f, 0.22 * vel, t, 6e-3, 22);
+    partial(o, f, 0.12 * vel, t, 6e-3, 20, 3.5);
+    partial(o, f * 2.81, 0.035 * vel, t, 4e-3, 6, 2);
+    partial(o, f * 5.6, 0.012 * vel, t, 2e-3, 1.5);
+    noise(o, t, 0.05, "bandpass", f * 8, 3, 0.04 * vel);
+  },
+  tibetan(inst, vel) {
+    const t = ac.currentTime, o = out(inst.pan, 1), f = inst.f;
+    [[1, 1, 18], [2.71, 0.55, 11], [5.15, 0.3, 6], [8.3, 0.16, 3.5], [12.1, 0.08, 2]].forEach(([r, a, d], i) => {
+      partial(o, f * r, 0.13 * vel * a, t, 4e-3, d, 0);
+      partial(o, f * r, 0.08 * vel * a, t, 4e-3, d * 0.9, 4 + i * 2);
+    });
+    noise(o, t, 0.08, "bandpass", 2500, 1.5, 0.06 * vel);
+  },
+  gong(inst, vel) {
+    const t = ac.currentTime, o = out(inst.pan, 1.2), f0 = inst.f;
+    partial(o, f0 * 0.5, 0.25 * vel, t, 0.01, 6);
+    for (let i = 0; i < 34; i++) {
+      const r = Math.pow(1.13, i) * (1 + (Math.random() - 0.5) * 0.06), f = f0 * r;
+      if (f > 5e3) break;
+      const bloom = r > 3 ? 0.25 + Math.random() * 1.6 : 0.01 + Math.random() * 0.05;
+      const amp = 0.09 * vel / Math.sqrt(1 + i * 0.5) * (r > 3 ? 0.9 : 1.3);
+      const osc = partial(o, f, amp, t, bloom, 9 + Math.random() * 12 - Math.min(8, i * 0.25), (Math.random() - 0.5) * 8);
+      osc.frequency.setValueAtTime(f * 1.004, t);
+      osc.frequency.exponentialRampToValueAtTime(f, t + 2.5);
+    }
+    noise(o, t, 1.2, "lowpass", 900, 0.7, 0.12 * vel, 0.01);
+    noise(o, t + 0.2, 4, "bandpass", 3200, 0.8, 0.03 * vel, 1.2);
+  },
+  chime(inst, vel, rod) {
+    const t = ac.currentTime, f = inst.notes[rod], o = out(inst.pan + (rod - 3) * 0.08, 1);
+    [[1, 1, 5], [2.76, 0.4, 2.2], [5.4, 0.15, 0.9], [8.93, 0.06, 0.4]].forEach(([r, a, d]) => partial(o, f * r, 0.07 * vel * a, t, 2e-3, d, (Math.random() - 0.5) * 6));
+  },
+  tingsha(inst, vel) {
+    const t = ac.currentTime, o = out(inst.pan, 1), f = inst.f;
+    partial(o, f, 0.08 * vel, t, 2e-3, 9);
+    partial(o, f * 1.0045, 0.07 * vel, t, 2e-3, 9);
+    partial(o, f * 2.13, 0.03 * vel, t, 2e-3, 4);
+    partial(o, f * 3.4, 0.015 * vel, t, 1e-3, 1.6);
+    noise(o, t, 0.03, "highpass", 5e3, 0.7, 0.05 * vel);
+  },
+  fork(inst, vel) {
+    const t = ac.currentTime, o = out(inst.pan, 0.8), f = inst.f;
+    partial(o, f, 0.2 * vel, t, 0.01, 14);
+    partial(o, f * 6.27, 0.02 * vel, t, 2e-3, 0.4);
+  },
+  tongue(inst, vel, k = 0) {
+    const t = ac.currentTime, f = inst.notes[k], o = out(inst.pan + (k - 3.5) * 0.05, 1);
+    const os = partial(o, f, 0.22 * vel, t, 4e-3, 3.2);
+    os.frequency.setValueAtTime(f * 1.012, t);
+    os.frequency.exponentialRampToValueAtTime(f, t + 0.06);
+    partial(o, f * 2, 0.06 * vel, t, 3e-3, 1.6, 3);
+    partial(o, f * 3.01, 0.025 * vel, t, 2e-3, 0.6);
+    noise(o, t, 0.03, "bandpass", 900, 1.5, 0.04 * vel);
+  },
+  rainstick(inst, vel) {
+    const t0 = ac.currentTime, o = out(inst.pan, 1), n = 420;
+    for (let i = 0; i < n; i++) {
+      const u = Math.random(), t = t0 + 6 * Math.pow(u, 1.6) + Math.random() * 0.05;
+      noise(o, t, 0.015 + Math.random() * 0.025, "bandpass", 2200 + Math.random() * 5e3, 2 + Math.random() * 3, 0.25 + Math.random() * 0.3);
+    }
+  }
+};
+function singVoice(inst) {
+  if (inst.voice) return inst.voice;
+  curLevel = levelOf(inst);
+  const o = out(inst.pan, 1.2);
+  curLevel = 1;
+  const g = ac.createGain();
+  g.gain.value = 0;
+  g.connect(o);
+  const ratios = inst.type === "crystal" ? [[1, 1], [1.0018, 0.6], [2.81, 0.06]] : inst.type === "gong" ? [[1, 0.6], [1.47, 0.4], [2.13, 0.3], [3.3, 0.2], [4.7, 0.1]] : [[1, 1], [1.003, 0.5], [2.71, 0.25]];
+  ratios.forEach(([r, a]) => {
+    const os = ac.createOscillator(), ga = ac.createGain();
+    os.frequency.value = inst.f * r;
+    ga.gain.value = a;
+    os.connect(ga);
+    ga.connect(g);
+    os.start();
+  });
+  if (inst.type === "gong") {
+    const n = ac.createBufferSource(), f = ac.createBiquadFilter(), ng = ac.createGain();
+    n.buffer = noiseBuf;
+    n.loop = true;
+    f.type = "lowpass";
+    f.frequency.value = 500;
+    ng.gain.value = 0.35;
+    n.connect(f);
+    f.connect(ng);
+    ng.connect(g);
+    n.start();
+  }
+  return inst.voice = g;
+}
+const beds = {};
+function toggleBed(name) {
+  if (!ac) return;
+  const btn = document.getElementById(name);
+  if (beds[name]) {
+    const b = beds[name];
+    b.g.gain.setTargetAtTime(0, ac.currentTime, 1.2);
+    setTimeout(() => b.stop(), 5e3);
+    delete beds[name];
+    btn.classList.remove("on");
+    return;
+  }
+  btn.classList.add("on");
+  const g = ac.createGain();
+  g.gain.value = 0;
+  const o = out(0, 0.7);
+  g.connect(o);
+  const nodes = [];
+  if (name === "drone") {
+    for (const [f, d] of [[65.41, -6], [65.41, 7], [98, 0], [130.81, 4], [196, -3]]) {
+      const os = ac.createOscillator();
+      os.type = "sawtooth";
+      os.frequency.value = f;
+      os.detune.value = d;
+      const fl = ac.createBiquadFilter();
+      fl.type = "lowpass";
+      fl.frequency.value = 700;
+      fl.Q.value = 1;
+      os.connect(fl);
+      fl.connect(g);
+      os.start();
+      nodes.push(os);
+    }
+    const lfo = ac.createOscillator(), la = ac.createGain();
+    lfo.frequency.value = 0.09;
+    la.gain.value = 0.015;
+    lfo.connect(la);
+    la.connect(g.gain);
+    lfo.start();
+    nodes.push(lfo);
+    g.gain.setTargetAtTime(0.04, ac.currentTime, 2);
+  } else {
+    const n = ac.createBufferSource();
+    n.buffer = noiseBuf;
+    n.loop = true;
+    const f = ac.createBiquadFilter();
+    f.type = name === "rain" ? "highpass" : "lowpass";
+    f.frequency.value = name === "rain" ? 1400 : 700;
+    n.connect(f);
+    f.connect(g);
+    n.start();
+    nodes.push(n);
+    if (name === "ocean") {
+      const lfo = ac.createOscillator(), la = ac.createGain();
+      lfo.frequency.value = 0.11;
+      la.gain.value = 0.06;
+      lfo.connect(la);
+      la.connect(g.gain);
+      lfo.start();
+      nodes.push(lfo);
+      g.gain.setTargetAtTime(0.07, ac.currentTime, 2);
+    } else g.gain.setTargetAtTime(0.05, ac.currentTime, 2);
+  }
+  beds[name] = { g, stop: () => nodes.forEach((n) => n.stop()) };
+}
+const CHAKRA = [["#e8394a", 261.63], ["#f28c28", 293.66], ["#f5d327", 329.63], ["#4fd16b", 349.23], ["#3aa8f0", 392], ["#6a5cf0", 440], ["#b46cf0", 493.88]];
+const INST = [
+  { type: "gong", name: "Gong", x: 800, y: 265, r: 135, f: 72, color: "#d9a441" },
+  { type: "chime", name: "Chimes", x: 370, y: 215, r: 115, notes: [523.25, 587.33, 659.26, 783.99, 880, 1046.5, 1174.66, 1318.5], color: "#cfd8e6" },
+  { type: "tingsha", name: "Tingsha", x: 1110, y: 150, r: 60, f: 2430, color: "#d6a845" },
+  { type: "fork", name: "OM fork", x: 1130, y: 330, r: 56, f: 136.1, color: "#c9d3df" },
+  { type: "fork", name: "528 fork", x: 1320, y: 380, r: 56, f: 528, color: "#c9d3df" },
+  { type: "tibetan", name: "Tibetan bowl", x: 300, y: 370, r: 70, f: 174, color: "#b8862f" },
+  { type: "tibetan", name: "Tibetan bowl", x: 455, y: 470, r: 60, f: 221, color: "#c08f37" },
+  { type: "tibetan", name: "Tibetan bowl", x: 345, y: 575, r: 54, f: 286, color: "#c99a40" },
+  ...CHAKRA.map(([c, f], i) => ({ type: "crystal", name: ["Root", "Sacral", "Solar", "Heart", "Throat", "Third eye", "Crown"][i], x: 430 + i * 123, y: 690 - Math.sin(i / 6 * Math.PI) * 50, r: 52 - i * 2, f, color: c })),
+  { type: "ocean", name: "Ocean drum", x: 1270, y: 600, r: 80, color: "#8a6a4a" },
+  { type: "tongue", name: "Tongue drum", x: 1080, y: 520, r: 80, notes: [196, 220, 261.63, 293.66, 329.63, 392, 440, 523.25], color: "#7fb6c9" },
+  { type: "rainstick", name: "Rain stick", x: 1300, y: 200, r: 60, color: "#9a7b4f" }
+];
+INST.forEach((i) => {
+  i.glow = 0;
+  i.ripples = [];
+  i.sing = 0;
+  i.swing = 0;
+  i.pan = (i.x - 800) / 800;
+});
+let L = [];
+function layout() {
+  L = INST.map((i) => ({ i, x: i.x * W / 1600, y: i.y * H / 1e3, r: i.r * S }));
+}
+const chime = INST.find((i) => i.type === "chime"), ocean = INST.find((i) => i.type === "ocean");
+const tongueAt = (nx) => Math.max(0, Math.min(7, Math.round((nx + 1) / 2 * 7)));
+const rodX = (l, k) => l.x - l.r * 0.85 + k / 7 * l.r * 1.7;
+const LEVELS = { "chime": 2.32, "tongue": 2.88, "tingsha": 3.85, "fork": 3.98, "gong": 0.98, "tibetan": 0.92, "rainstick": 4.6 }, CRYSTAL_LEVELS = [0.68, 0.75, 0.85, 0.98, 1.17, 1.48, 2.09];
+function levelOf(i) {
+  var _a, _b;
+  if (i.type === "crystal") return (_a = CRYSTAL_LEVELS[CHAKRA.findIndex((c) => c[1] === i.f)]) != null ? _a : 1;
+  return (_b = LEVELS[i.type]) != null ? _b : 1;
+}
+const PLAYED = { strikes: 0, strokes: 0, sings: 0, by: {} };
+function strike(inst, vel = 0.85, extra) {
+  if (!ac) return;
+  if (inst.type === "ocean") return;
+  curLevel = levelOf(inst);
+  SOUNDS[inst.type](inst, vel, extra);
+  curLevel = 1;
+  inst.glow = 1;
+  inst.swing = 1;
+  inst.ripples.push({ r: 0, a: 0.9 });
+}
+const pointers = /* @__PURE__ */ new Map();
+function hit(px, py) {
+  for (let k = L.length - 1; k >= 0; k--) {
+    const l = L[k];
+    if (Math.hypot(px - l.x, py - l.y) < l.r * (l.i.type === "chime" ? 1.1 : 1)) return l;
+  }
+  return null;
+}
+cv.addEventListener("pointerdown", (e) => {
+  const px = e.clientX * DPR, py = e.clientY * DPR, l = hit(px, py);
+  pointers.set(e.pointerId, { l, px, py, ang: null, spin: 0, last: performance.now(), lastRod: null });
+  if (!l) return;
+  if (l.i.type === "chime") {
+    const k = Math.round((px - (l.x - l.r * 0.85)) / (l.r * 1.7) * 7);
+    if (k >= 0 && k < 8) {
+      strike(l.i, 0.8, k);
+      pointers.get(e.pointerId).lastRod = k;
+    }
+  } else if (l.i.type === "tongue") strike(l.i, 0.85, tongueAt((px - l.x) / l.r));
+  else strike(l.i, 0.85);
+  cv.setPointerCapture(e.pointerId);
+});
+cv.addEventListener("pointermove", (e) => {
+  const p = pointers.get(e.pointerId);
+  if (!p || !p.l) return;
+  const px = e.clientX * DPR, py = e.clientY * DPR, now = performance.now(), dt = Math.max(1, now - p.last) / 1e3, l = p.l, i = l.i;
+  if (i.type === "chime") {
+    const k = Math.round((px - (l.x - l.r * 0.85)) / (l.r * 1.7) * 7);
+    if (k >= 0 && k < 8 && k !== p.lastRod) {
+      strike(i, 0.55 + Math.random() * 0.2, k);
+      p.lastRod = k;
+    }
+  } else if (["crystal", "tibetan", "gong"].includes(i.type)) {
+    const ang = Math.atan2(py - l.y, px - l.x);
+    if (p.ang !== null) {
+      let d = ang - p.ang;
+      if (d > Math.PI) d -= 2 * Math.PI;
+      if (d < -Math.PI) d += 2 * Math.PI;
+      p.spin = p.spin * 0.8 + Math.abs(d / dt) * 0.2;
+    }
+    p.ang = ang;
+    i.touchSing = Math.min(1, p.spin / 9);
+  } else if (i.type === "ocean") {
+    const sp = Math.hypot(px - p.px, py - p.py) / dt / (S * 900);
+    i.sway = Math.min(1, (i.sway || 0) * 0.7 + sp * 0.3);
+    i.tilt = Math.max(-1, Math.min(1, (px - l.x) / l.r));
+  }
+  p.px = px;
+  p.py = py;
+  p.last = now;
+});
+const endPointer = (e) => {
+  const p = pointers.get(e.pointerId);
+  if (p && p.l) {
+    p.l.i.touchSing = 0;
+    if (p.l.i.type === "ocean") p.l.i.sway = 0;
+  }
+  pointers.delete(e.pointerId);
+};
+cv.addEventListener("pointerup", endPointer);
+cv.addEventListener("pointercancel", endPointer);
+let oceanVoice = null;
+function updateOcean() {
+  if (!ac) return;
+  if (!oceanVoice) {
+    const n = ac.createBufferSource();
+    n.buffer = noiseBuf;
+    n.loop = true;
+    const f = ac.createBiquadFilter();
+    f.type = "bandpass";
+    f.frequency.value = 2600;
+    f.Q.value = 0.5;
+    const g = ac.createGain();
+    g.gain.value = 0;
+    n.connect(f);
+    f.connect(g);
+    g.connect(out(ocean.pan, 1));
+    n.start();
+    oceanVoice = { g, f };
+  }
+  const target = (ocean.sway || 0) * 0.35;
+  oceanVoice.g.gain.setTargetAtTime(target, ac.currentTime, 0.12);
+  oceanVoice.f.frequency.setTargetAtTime(1800 + 1800 * (ocean.sway || 0), ac.currentTime, 0.2);
+  ocean.glow = Math.max(ocean.glow, (ocean.sway || 0) * 0.8);
+  ocean.sway = (ocean.sway || 0) * 0.94;
+}
+const candles = Array.from({ length: 9 }, (_, k) => ({ x: 120 + k * 170, y: 470 + k % 2 * 12, h: 40 + k * 37 % 30, ph: Math.random() * 10 }));
+const motes = Array.from({ length: 70 }, () => ({ x: Math.random() * 1600, y: Math.random() * 1e3, v: 0.1 + Math.random() * 0.25, s: 0.6 + Math.random() * 1.6 }));
+let breathOn = false, breathT0 = 0;
+function draw(now) {
+  const t = now / 1e3, X = (x) => x * W / 1600, Y = (y) => y * H / 1e3;
+  const room3D = window.SB3D && SB3D.ready;
+  if (room3D) ctx.clearRect(0, 0, W, H);
+  else {
+    const bg = ctx.createRadialGradient(W / 2, H * 0.55, 0, W / 2, H * 0.55, Math.max(W, H) * 0.75);
+    bg.addColorStop(0, "#2a170c");
+    bg.addColorStop(0.55, "#140b06");
+    bg.addColorStop(1, "#040302");
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#0d0805";
+    ctx.fillRect(0, Y(500), W, H - Y(500));
+    ctx.save();
+    ctx.translate(X(800), Y(760));
+    ctx.scale(1, 0.32);
+    const mat = ctx.createRadialGradient(0, 0, 0, 0, 0, 760 * S);
+    mat.addColorStop(0, "#3a1f12");
+    mat.addColorStop(0.8, "#24130b");
+    mat.addColorStop(1, "#0d080500");
+    ctx.fillStyle = mat;
+    ctx.beginPath();
+    ctx.arc(0, 0, 760 * S, 0, 6.283);
+    ctx.fill();
+    ctx.restore();
+    for (const c of candles) {
+      const cx = X(c.x), cy = Y(c.y), fl = 1 + 0.12 * Math.sin(t * 9 + c.ph) + 0.08 * Math.sin(t * 23 + c.ph * 2);
+      const halo = ctx.createRadialGradient(cx, cy - c.h * S, 0, cx, cy - c.h * S, 120 * S * fl);
+      halo.addColorStop(0, "#ffb35a40");
+      halo.addColorStop(1, "#ffb35a00");
+      ctx.fillStyle = halo;
+      glowRect(cx - 130 * S, cy - c.h * S - 130 * S, 260 * S, 260 * S);
+      ctx.fillStyle = "#e9dcc4";
+      ctx.fillRect(cx - 9 * S, cy - c.h * S, 18 * S, c.h * S);
+      ctx.fillStyle = "#ffd38a";
+      ctx.beginPath();
+      ctx.ellipse(cx, cy - c.h * S - 9 * S * fl, 4.5 * S, 10 * S * fl, 0, 0, 6.283);
+      ctx.fill();
+    }
+  }
+  ctx.fillStyle = "#ffd9a0";
+  for (const m of motes) {
+    m.y -= m.v;
+    m.x += Math.sin(t * 0.3 + m.y * 0.01) * 0.2;
+    if (m.y < 0) m.y = 1e3;
+    ctx.globalAlpha = (room3D ? 0.45 : 1) * (0.12 + 0.1 * Math.sin(t + m.x));
+    ctx.fillRect(X(m.x), Y(m.y), m.s * S, m.s * S);
+  }
+  ctx.globalAlpha = 1;
+  for (const l of L) drawInst(l, t);
+  if (breathOn) {
+    const cyc = (now - breathT0) / 1e3 % 10, inhale = cyc < 4, k = inhale ? cyc / 4 : 1 - (cyc - 4) / 6;
+    const r = (60 + 90 * (0.5 - 0.5 * Math.cos(k * Math.PI))) * S, bx = X(800), by = Y(620);
+    const g = ctx.createRadialGradient(bx, by, 0, bx, by, r);
+    g.addColorStop(0, "#ffe6c430");
+    g.addColorStop(1, "#ffe6c400");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(bx, by, r, 0, 6.283);
+    ctx.fill();
+    ctx.strokeStyle = "#ffe6c455";
+    ctx.lineWidth = 2 * S;
+    ctx.beginPath();
+    ctx.arc(bx, by, r, 0, 6.283);
+    ctx.stroke();
+    ctx.fillStyle = "#ffe6c4dd";
+    ctx.font = "600 ".concat(Math.max(16 * DPR, 30 * S), "px -apple-system, system-ui");
+    ctx.textAlign = "center";
+    ctx.fillText(inhale ? "breathe in" : "breathe out", bx, by + 6 * S);
+  }
+}
+function drawInst(l, t) {
+  const i = l.i, x = l.x, y = l.y, r = l.r;
+  i.glow *= 0.985;
+  i.swing *= 0.97;
+  for (const h of Object.values(HANDS)) if (bodyLive && h.hover === i) {
+    i.glow = Math.max(i.glow, 0.25);
+    if (h.dwellK < 1) {
+      ctx.strokeStyle = hexA(h.color, 0.9);
+      ctx.lineWidth = 4 * S;
+      ctx.beginPath();
+      ctx.arc(x, y, r * 1.25, -Math.PI / 2, -Math.PI / 2 + h.dwellK * 6.283);
+      ctx.stroke();
+    }
+  }
+  for (let k = i.ripples.length - 1; k >= 0; k--) {
+    const rp = i.ripples[k];
+    rp.r += 2.2 * S;
+    rp.a *= 0.985;
+    if (rp.a < 0.02) {
+      i.ripples.splice(k, 1);
+      continue;
+    }
+    ctx.strokeStyle = hexA(i.color, rp.a * 0.5);
+    ctx.lineWidth = 2 * S;
+    ctx.beginPath();
+    ctx.ellipse(x, y, r + rp.r, (r + rp.r) * (i.type === "gong" || i.type === "chime" ? 1 : 0.45), 0, 0, 6.283);
+    ctx.stroke();
+  }
+  const g = Math.max(i.glow, i.sing);
+  if (g > 0.01) {
+    const halo = ctx.createRadialGradient(x, y, 0, x, y, r * 2.2);
+    halo.addColorStop(0, hexA(i.color, 0.35 * g));
+    halo.addColorStop(1, hexA(i.color, 0));
+    ctx.fillStyle = halo;
+    glowRect(x - r * 2.3, y - r * 2.3, r * 4.6, r * 4.6);
+  }
+  ctx.textAlign = "center";
+  if (window.SB3D && SB3D.ready) {
+    if ((i.type === "crystal" || i.type === "tibetan") && i.sing > 0.02) {
+      ctx.strokeStyle = hexA(i.color, 0.8 * i.sing);
+      ctx.lineWidth = 3 * S;
+      ctx.beginPath();
+      ctx.ellipse(x, y, r * 1.08, r * 0.34, 0, t * 6, t * 6 + 2.2);
+      ctx.stroke();
+    }
+    return;
+  }
+  if (i.type === "gong") {
+    ctx.strokeStyle = "#4a2c18";
+    ctx.lineWidth = 16 * S;
+    ctx.beginPath();
+    ctx.moveTo(x - r * 1.3, y + r * 1.45);
+    ctx.lineTo(x - r * 1.3, y - r * 1.25);
+    ctx.lineTo(x + r * 1.3, y - r * 1.25);
+    ctx.lineTo(x + r * 1.3, y + r * 1.45);
+    ctx.stroke();
+    const sw = Math.sin(t * 3) * i.swing * 0.05;
+    ctx.save();
+    ctx.translate(x, y - r * 1.25);
+    ctx.rotate(sw);
+    ctx.translate(0, r * 1.25);
+    ctx.strokeStyle = "#2a1a10";
+    ctx.lineWidth = 3 * S;
+    ctx.beginPath();
+    ctx.moveTo(-r * 0.5, -r * 0.88);
+    ctx.lineTo(-r * 0.6, -r * 1.25);
+    ctx.moveTo(r * 0.5, -r * 0.88);
+    ctx.lineTo(r * 0.6, -r * 1.25);
+    ctx.stroke();
+    const dg = ctx.createRadialGradient(-r * 0.25, -r * 0.3, r * 0.05, 0, 0, r);
+    dg.addColorStop(0, "#f6d27a");
+    dg.addColorStop(0.35, "#c9902f");
+    dg.addColorStop(0.8, "#8a5a1c");
+    dg.addColorStop(1, "#5a3a12");
+    ctx.fillStyle = dg;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, 6.283);
+    ctx.fill();
+    ctx.strokeStyle = "#ffe2a055";
+    ctx.lineWidth = 1.5 * S;
+    for (let k = 1; k < 7; k++) {
+      ctx.beginPath();
+      ctx.arc(0, 0, r * k / 7, 0, 6.283);
+      ctx.stroke();
+    }
+    ctx.fillStyle = "#e3b456";
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 0.18, 0, 6.283);
+    ctx.fill();
+    ctx.restore();
+  } else if (i.type === "crystal" || i.type === "tibetan") {
+    const crystal = i.type === "crystal", wob = Math.sin(t * 30) * i.glow * 1.2 * S;
+    if (crystal) {
+      const pool = ctx.createRadialGradient(x, y + r * 0.35, 0, x, y + r * 0.35, r * 1.4);
+      pool.addColorStop(0, hexA(i.color, 0.45 + 0.4 * g));
+      pool.addColorStop(1, hexA(i.color, 0));
+      ctx.fillStyle = pool;
+      glowRect(x - r * 1.5, y - r, r * 3, r * 2.6);
+    } else {
+      ctx.fillStyle = "#5a1e1e";
+      ctx.beginPath();
+      ctx.ellipse(x, y + r * 0.42, r * 1.05, r * 0.32, 0, 0, 6.283);
+      ctx.fill();
+    }
+    const body = ctx.createLinearGradient(x - r, y, x + r, y);
+    if (crystal) {
+      body.addColorStop(0, "#d9dde3");
+      body.addColorStop(0.45, "#ffffff");
+      body.addColorStop(1, "#b9c0c9");
+    } else {
+      body.addColorStop(0, "#6e4a1c");
+      body.addColorStop(0.4, "#d6a24a");
+      body.addColorStop(1, "#7a5220");
+    }
+    ctx.fillStyle = body;
+    ctx.beginPath();
+    ctx.moveTo(x - r, y);
+    ctx.bezierCurveTo(x - r, y + r * 0.75, x + r, y + r * 0.75, x + r, y);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = crystal ? "#eef1f5" : "#3a260e";
+    ctx.beginPath();
+    ctx.ellipse(x + wob, y, r, r * 0.3, 0, 0, 6.283);
+    ctx.fill();
+    ctx.fillStyle = crystal ? hexA(i.color, 0.25 + 0.5 * g) : "#2a1a0a";
+    ctx.beginPath();
+    ctx.ellipse(x + wob, y + r * 0.03, r * 0.86, r * 0.24, 0, 0, 6.283);
+    ctx.fill();
+    if (i.sing > 0.02) {
+      ctx.strokeStyle = hexA(i.color, 0.8 * i.sing);
+      ctx.lineWidth = 3 * S;
+      ctx.beginPath();
+      ctx.ellipse(x, y, r * 1.08, r * 0.34, 0, t * 6, t * 6 + 2.2);
+      ctx.stroke();
+    }
+  } else if (i.type === "chime") {
+    ctx.fillStyle = "#5a3a22";
+    ctx.fillRect(x - r * 1, y - r * 0.95, r * 2, 10 * S);
+    for (let k = 0; k < 8; k++) {
+      const rx = rodX(l, k), len = r * (1.5 - k * 0.09), sw = Math.sin(t * 4 + k) * i.swing * 6 * S;
+      ctx.strokeStyle = "#ffffff40";
+      ctx.lineWidth = 1 * S;
+      ctx.beginPath();
+      ctx.moveTo(rx, y - r * 0.9);
+      ctx.lineTo(rx + sw * 0.3, y - r * 0.75);
+      ctx.stroke();
+      const rg = ctx.createLinearGradient(rx - 6 * S, 0, rx + 6 * S, 0);
+      rg.addColorStop(0, "#8d97a6");
+      rg.addColorStop(0.5, "#f4f7fb");
+      rg.addColorStop(1, "#7d8796");
+      ctx.fillStyle = rg;
+      glowRect(rx - 5 * S + sw, y - r * 0.75, 10 * S, len);
+    }
+  } else if (i.type === "tingsha") {
+    for (const s of [-1, 1]) {
+      const cg = ctx.createRadialGradient(x + s * r * 0.55, y, 0, x + s * r * 0.55, y, r * 0.55);
+      cg.addColorStop(0, "#f2cf72");
+      cg.addColorStop(1, "#8a6020");
+      ctx.fillStyle = cg;
+      ctx.beginPath();
+      ctx.arc(x + s * r * 0.55, y + Math.sin(t * 20) * i.glow * 2 * S, r * 0.5, 0, 6.283);
+      ctx.fill();
+    }
+    ctx.strokeStyle = "#3a2a1a";
+    ctx.lineWidth = 3 * S;
+    ctx.beginPath();
+    ctx.moveTo(x - r * 0.55, y);
+    ctx.quadraticCurveTo(x, y - r * 1.2, x + r * 0.55, y);
+    ctx.stroke();
+  } else if (i.type === "fork") {
+    const v = Math.sin(t * 60) * i.glow * 2 * S;
+    ctx.strokeStyle = "#d7dee8";
+    ctx.lineWidth = 7 * S;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(x - r * 0.25 - v, y - r * 1.1);
+    ctx.lineTo(x - r * 0.25, y);
+    ctx.quadraticCurveTo(x, y + r * 0.35, x + r * 0.25, y);
+    ctx.lineTo(x + r * 0.25 + v, y - r * 1.1);
+    ctx.moveTo(x, y + r * 0.25);
+    ctx.lineTo(x, y + r * 0.95);
+    ctx.stroke();
+    ctx.lineCap = "butt";
+  } else if (i.type === "ocean") {
+    const dg = ctx.createRadialGradient(x, y, 0, x, y, r);
+    dg.addColorStop(0, "#2a4a5c");
+    dg.addColorStop(0.85, "#16303e");
+    dg.addColorStop(1, "#6a4a2a");
+    ctx.fillStyle = dg;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, 6.283);
+    ctx.fill();
+    ctx.strokeStyle = "#8a6a44";
+    ctx.lineWidth = 7 * S;
+    ctx.stroke();
+    i.beads = i.beads || Array.from({ length: 60 }, () => ({ a: Math.random() * 6.283, d: Math.random() }));
+    const tilt = i.tilt || 0;
+    ctx.fillStyle = "#d6e4ea";
+    for (const b of i.beads) {
+      b.a += (i.sway || 0) * 0.05 * (1 + b.d) * Math.sign(tilt || 1);
+      const rr = r * (0.2 + 0.7 * b.d);
+      ctx.beginPath();
+      ctx.arc(x + Math.cos(b.a) * rr, y + Math.sin(b.a) * rr, 2.2 * S, 0, 6.283);
+      ctx.fill();
+    }
+  } else if (i.type === "tongue") {
+    ctx.save();
+    ctx.translate(x, y);
+    const og = ctx.createRadialGradient(-r * 0.3, -r * 0.3, 0, 0, 0, r);
+    og.addColorStop(0, "#9fc3cf");
+    og.addColorStop(0.7, "#3d5d6a");
+    og.addColorStop(1, "#22343c");
+    ctx.fillStyle = og;
+    ctx.beginPath();
+    for (let k = 0; k < 8; k++) {
+      const a = k * Math.PI / 4 + Math.PI / 8;
+      ctx[k ? "lineTo" : "moveTo"](Math.cos(a) * r, Math.sin(a) * r);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = "#d8eef5aa";
+    ctx.lineWidth = 2.2 * S;
+    for (let k = 0; k < 8; k++) {
+      ctx.save();
+      ctx.rotate(k * Math.PI / 4);
+      ctx.beginPath();
+      ctx.moveTo(r * 0.28, -r * 0.12);
+      ctx.lineTo(r * 0.78, -r * 0.12);
+      ctx.arc(r * 0.78, 0, r * 0.12, -Math.PI / 2, Math.PI / 2);
+      ctx.lineTo(r * 0.28, r * 0.12);
+      ctx.stroke();
+      ctx.restore();
+    }
+    ctx.fillStyle = "#d8eef5";
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 0.1, 0, 6.283);
+    ctx.fill();
+    ctx.restore();
+  } else if (i.type === "rainstick") {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(-1.05 + Math.sin(t * 2) * i.glow * 0.05);
+    const rg = ctx.createLinearGradient(0, -14 * S, 0, 14 * S);
+    rg.addColorStop(0, "#c9a46a");
+    rg.addColorStop(0.5, "#8a6a3a");
+    rg.addColorStop(1, "#5a4222");
+    ctx.fillStyle = rg;
+    glowRect(-r * 1.6, -14 * S, r * 3.2, 28 * S);
+    ctx.fillStyle = "#3a2a16";
+    for (let k = 0; k < 16; k++) ctx.fillRect(-r * 1.5 + k * r * 0.2, -14 * S, 2 * S, 28 * S);
+    ctx.restore();
+  }
+}
+function glowRect(x, y, w, h) {
+  ctx.beginPath();
+  ctx.rect(x, y, w, h);
+  ctx.fill();
+}
+function hexA(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return "rgba(".concat(n >> 16, ",").concat(n >> 8 & 255, ",").concat(n & 255, ",").concat(Math.max(0, Math.min(1, a)), ")");
+}
+function updateSinging() {
+  if (!ac) return;
+  for (const i of INST) {
+    if (!["crystal", "tibetan", "gong"].includes(i.type)) continue;
+    i.sing = Math.max(i.touchSing || 0, i.bodySing || 0);
+    if (i.sing > 0.01 || i.voice) {
+      const v = singVoice(i), level = i.type === "gong" ? 0.12 : i.type === "crystal" ? 0.16 : 0.12;
+      v.gain.setTargetAtTime(level * i.sing, ac.currentTime, i.sing > 0.01 ? 0.35 : 1.2);
+      if (i.sing > 0.05 && Math.random() < 0.02) i.ripples.push({ r: 0, a: 0.5 * i.sing });
+    }
+  }
+}
+class OneEuro {
+  constructor(minCutoff = 1.4, beta = 0.5) {
+    this.minCutoff = minCutoff;
+    this.beta = beta;
+    this.x = null;
+    this.dx = 0;
+  }
+  static a(c, dt) {
+    const tau = 1 / (2 * Math.PI * c);
+    return 1 / (1 + tau / dt);
+  }
+  filter(v, dt) {
+    if (this.x === null) {
+      this.x = v;
+      return v;
+    }
+    const d = (v - this.x) / dt;
+    this.dx += OneEuro.a(1, dt) * (d - this.dx);
+    this.x += OneEuro.a(this.minCutoff + this.beta * Math.abs(this.dx), dt) * (v - this.x);
+    return this.x;
+  }
+}
+let lastBodyAt = 0, phoneWS = null;
+const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+let right = [1, 0, 0], center = null, lastSeen = 0;
+const HANDS = {
+  lHand: { color: "#ff7ad9", x: 0, y: 0, vx: 0, vy: 0, inside: /* @__PURE__ */ new Set(), spinAng: {}, spin: {}, rod: null, dwell: null, dwellT: 0 },
+  rHand: { color: "#66e0ff", x: 0, y: 0, vx: 0, vy: 0, inside: /* @__PURE__ */ new Set(), spinAng: {}, spin: {}, rod: null, dwell: null, dwellT: 0 }
+};
+let bodyLive = false, bodyPts = {};
+const cooldown = /* @__PURE__ */ new Map();
+const REACH = { x: [-0.45, 0.52], y: [-0.03, 0.48], xs: [], ys: [], next: 0 };
+function learnReach(lat, up, now) {
+  REACH.xs.push(lat);
+  REACH.ys.push(up);
+  if (REACH.xs.length > 3e3) {
+    REACH.xs.shift();
+    REACH.ys.shift();
+  }
+  if (now < REACH.next || REACH.xs.length < 600) return;
+  REACH.next = now + 1e3;
+  const q = (a, p) => {
+    const b = [...a].sort((m, n) => m - n);
+    return b[Math.floor(p * (b.length - 1))];
+  };
+  const span = (lo, hi, min) => {
+    const c = (lo + hi) / 2, h = Math.max(min, hi - lo) / 2;
+    return [c - h, c + h];
+  };
+  const nx = span(q(REACH.xs, 0.04), q(REACH.xs, 0.96), 0.7), ny = span(q(REACH.ys, 0.04), q(REACH.ys, 0.96), 0.4);
+  REACH.x = REACH.x.map((v, i) => v + 0.2 * (nx[i] - v));
+  REACH.y = REACH.y.map((v, i) => v + 0.2 * (ny[i] - v));
+}
+function features(p, root) {
+  const rel = sub(p, root);
+  return [dot3(rel, right), rel[1]];
+}
+function toDesign(p, root, learn, now, side) {
+  const [lat, up] = features(p, root);
+  const C = CALIB.map && CALIB.map[side];
+  if (C) return [C[0] * lat + C[1] * up + C[2], C[3] * lat + C[4] * up + C[5]];
+  if (learn) learnReach(lat, up, now);
+  return [60 + (lat - REACH.x[0]) / (REACH.x[1] - REACH.x[0]) * 1480, 950 - (up - REACH.y[0]) / (REACH.y[1] - REACH.y[0]) * 880];
+}
+const BOX = { w: 0.9, h: 1, out: 0.15, down: 0.67 };
+function reachBox(J, sh, out2) {
+  const T = Math.max(0.3, Math.min(0.75, (J.rShoulder[1] + J.lShoulder[1]) / 2 - J.root[1]));
+  const shp = J[sh];
+  return (p) => {
+    const rel = sub(p, shp), lat = dot3(rel, right) - out2 * BOX.out * T, up = rel[1] + BOX.down * T;
+    const u = lat / (BOX.w * T) + 0.5, v = up / (BOX.h * T) + 0.5;
+    return [800 + (u - 0.5) * 1700, 500 - (v - 0.5) * 1060];
+  };
+}
+const CAL_TARGETS = [
+  ["rHand", 800, 520],
+  ["rHand", 1480, 520],
+  ["rHand", 1250, 110],
+  ["rHand", 1250, 900],
+  ["rHand", 480, 520],
+  ["lHand", 800, 520],
+  ["lHand", 120, 520],
+  ["lHand", 350, 110],
+  ["lHand", 350, 900],
+  ["lHand", 1120, 520]
+];
+if (location.search.includes("recal")) localStorage.removeItem("sb_calib");
+localStorage.removeItem("sb_calib");
+const CALIB = { map: null, on: false, step: 0, t0: 0, buf: [], samples: [], held: 0 };
+function startCalib() {
+  CALIB.on = true;
+  CALIB.step = 0;
+  CALIB.t0 = performance.now() + 5e3;
+  CALIB.buf = [];
+  CALIB.samples = [];
+  CALIB.held = 0;
+  document.getElementById("calib").classList.add("on");
+}
+function calibTick(now, J) {
+  const [side, tx, ty] = CAL_TARGETS[CALIB.step];
+  if (!J[side]) return;
+  const f = features(J[side], J.root);
+  CALIB.buf.push(f);
+  if (CALIB.buf.length > 24) CALIB.buf.shift();
+  const mx = CALIB.buf.reduce((a, b) => a + b[0], 0) / CALIB.buf.length, my = CALIB.buf.reduce((a, b) => a + b[1], 0) / CALIB.buf.length;
+  const wob = Math.max(...CALIB.buf.map((b) => Math.hypot(b[0] - mx, b[1] - my)));
+  const steady = CALIB.buf.length >= 20 && wob < 0.045 && now - CALIB.t0 > 3e3;
+  CALIB.held = steady ? CALIB.held + 1 : Math.max(0, CALIB.held - 2);
+  if (CALIB.held >= 70) {
+    CALIB.samples.push({ side, f: [mx, my], t: [tx, ty] });
+    try {
+      phoneWS && phoneWS.send(JSON.stringify({ type: "calib-point", side, lat: +mx.toFixed(3), up: +my.toFixed(3), target: [tx, ty], wall: Date.now() / 1e3 }));
+    } catch (e) {
+    }
+    if (ac) {
+      const o = out(0, 1);
+      partial(o, 880, 0.12, ac.currentTime, 5e-3, 1.2);
+    }
+    CALIB.step++;
+    CALIB.t0 = now;
+    CALIB.buf = [];
+    CALIB.held = 0;
+    if (CALIB.step >= CAL_TARGETS.length) finishCalib();
+  }
+}
+function fitAffine(pts) {
+  const solve = (k) => {
+    let A = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], B = [0, 0, 0];
+    for (const p of pts) {
+      const v = [p.f[0], p.f[1], 1];
+      for (let r = 0; r < 3; r++) {
+        B[r] += v[r] * p.t[k];
+        for (let c = 0; c < 3; c++) A[r][c] += v[r] * v[c];
+      }
+    }
+    for (let r = 0; r < 3; r++) A[r][r] += 1e-6;
+    for (let i = 0; i < 3; i++) {
+      let m = i;
+      for (let r = i + 1; r < 3; r++) if (Math.abs(A[r][i]) > Math.abs(A[m][i])) m = r;
+      [A[i], A[m]] = [A[m], A[i]];
+      [B[i], B[m]] = [B[m], B[i]];
+      for (let r = 0; r < 3; r++) if (r !== i) {
+        const q = A[r][i] / A[i][i];
+        for (let c = i; c < 3; c++) A[r][c] -= q * A[i][c];
+        B[r] -= q * B[i];
+      }
+    }
+    return [B[0] / A[0][0], B[1] / A[1][1], B[2] / A[2][2]];
+  };
+  return [...solve(0), ...solve(1)];
+}
+function finishCalib() {
+  const map = {};
+  for (const side of ["rHand", "lHand"]) map[side] = fitAffine(CALIB.samples.filter((s) => s.side === side));
+  map.rForearm = map.rHand;
+  map.lForearm = map.lHand;
+  CALIB.map = map;
+  CALIB.on = false;
+  localStorage.sb_calib = JSON.stringify(map);
+  try {
+    phoneWS && phoneWS.send(JSON.stringify({ type: "calib-done", map, wall: Date.now() / 1e3 }));
+  } catch (e) {
+  }
+  document.getElementById("calib").classList.remove("on");
+  calibMsg = { text: "calibrated ✓", until: performance.now() + 2500 };
+}
+let calibMsg = null;
+function drawCalib(now) {
+  const X = (x2) => x2 * W / 1600, Y = (y2) => y2 * H / 1e3;
+  if (calibMsg && now < calibMsg.until) {
+    ctx.fillStyle = "#9dffd0";
+    ctx.font = "".concat(34 * S, "px -apple-system, system-ui");
+    ctx.textAlign = "center";
+    ctx.fillText(calibMsg.text, W / 2, H * 0.5);
+  }
+  if (!CALIB.on) return;
+  if (now < CALIB.t0 && CALIB.step === 0) {
+    ctx.fillStyle = "#ffe6c4";
+    ctx.textAlign = "center";
+    ctx.font = "".concat(34 * S, "px -apple-system, system-ui");
+    ctx.fillText("Calibration: stand where you will play, facing the screen", W / 2, H * 0.44);
+    ctx.font = "".concat(22 * S, "px -apple-system, system-ui");
+    ctx.fillStyle = "#ffe6c4aa";
+    ctx.fillText("starting in ".concat(Math.ceil((CALIB.t0 - now) / 1e3), "…"), W / 2, H * 0.44 + 46 * S);
+    return;
+  }
+  const [side, tx, ty] = CAL_TARGETS[CALIB.step], col = side === "rHand" ? "#66e0ff" : "#ff7ad9", x = X(tx), y = Y(ty), r = 46 * S;
+  const wait = CALIB.t0 + 3e3 - now;
+  const pulse = 1 + 0.08 * Math.sin(now / 200);
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r * 2.5 * pulse);
+  g.addColorStop(0, hexA(col, 0.6));
+  g.addColorStop(1, hexA(col, 0));
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(x, y, r * 2.5 * pulse, 0, 6.283);
+  ctx.fill();
+  ctx.strokeStyle = hexA(col, 0.95);
+  ctx.lineWidth = 6 * S;
+  ctx.beginPath();
+  ctx.arc(x, y, r, -Math.PI / 2, -Math.PI / 2 + Math.min(1, CALIB.held / 70) * 6.283);
+  ctx.stroke();
+  ctx.fillStyle = "#ffe6c4";
+  ctx.textAlign = "center";
+  ctx.font = "".concat(30 * S, "px -apple-system, system-ui");
+  ctx.fillText("".concat(side === "rHand" ? "RIGHT" : "LEFT", " hand: reach to the glowing circle and hold still"), W / 2, H * 0.47);
+  if (wait > 0) {
+    ctx.font = "".concat(22 * S, "px -apple-system, system-ui");
+    ctx.fillStyle = hexA(col, 0.9);
+    ctx.fillText("get there… listening in ".concat(Math.ceil(wait / 1e3)), W / 2, H * 0.47 + 80 * S);
+  }
+  ctx.font = "".concat(20 * S, "px -apple-system, system-ui");
+  ctx.fillStyle = "#ffe6c499";
+  ctx.fillText("target ".concat(CALIB.step + 1, " of ").concat(CAL_TARGETS.length, " · point where you'd WANT your hand on the screen"), W / 2, H * 0.47 + 40 * S);
+}
+function updateBody(now) {
+  const J = BodyMovin.joints;
+  bodyLive = !!(BodyMovin.live && !BodyMovin.mouse && J && J.root);
+  if (bodyLive) lastBodyAt = now;
+  if (!bodyLive) {
+    INST.forEach((i) => i.bodySing = 0);
+    return;
+  }
+  if (J.lShoulder && J.rShoulder) {
+    let r = sub(J.rShoulder, J.lShoulder);
+    r[1] = 0;
+    const n = Math.hypot(r[0], r[2]);
+    if (n > 0.05) {
+      r = r.map((c) => c / n);
+      right = dot3(r, right) < 0.3 ? r : right.map((c, i) => c + 0.08 * (r[i] - c));
+      const m = Math.hypot(...right);
+      right = right.map((c) => c / m);
+    }
+  }
+  if (!center || now - lastSeen > 1500) {
+    center = J.root.slice();
+  }
+  lastSeen = now;
+  center = center.map((c, i) => c + 2e-3 * (J.root[i] - c));
+  if (CALIB.on) {
+    calibTick(now, J);
+    return;
+  }
+  bodyPts = {};
+  for (const [side, bh, fa] of [["rHand", "right", "rForearm"], ["lHand", "left", "lForearm"]]) {
+    const h = BodyMovin.hands[bh];
+    if (!h.seen) continue;
+    bodyPts[side] = [h.x * 1600, h.y * 1e3];
+    const e = BodyMovin.mirrorPt && BodyMovin.mirrorPt(fa);
+    if (e) bodyPts[fa] = [e[0] * 1600, e[1] * 1e3];
+  }
+  const dtS = Math.min(0.05, Math.max(1 / 240, (now - (updateBody.last || now)) / 1e3)) || 1 / 60;
+  updateBody.last = now;
+  INST.forEach((i) => i.bodySing = 0);
+  for (const [k, h] of Object.entries(HANDS)) {
+    if (!bodyPts[k]) continue;
+    let [nx, ny] = [Math.max(8, Math.min(1592, bodyPts[k][0])), Math.max(8, Math.min(992, bodyPts[k][1]))];
+    let best = null, bd = 1e9;
+    for (const i of INST) {
+      const d = Math.hypot(nx - i.x, ny - i.y) / (i.r * 1.45);
+      if (d < 1 && d < bd) {
+        bd = d;
+        best = i;
+      }
+    }
+    if (h.hover && Math.hypot(nx - h.hover.x, ny - h.hover.y) < h.hover.r * 1.7) best = h.hover, bd = Math.min(bd, Math.hypot(nx - best.x, ny - best.y) / (best.r * 1.45));
+    if (best) {
+      const pull = 0.3 * Math.max(0, 1 - bd);
+      nx += (best.x - nx) * pull;
+      ny += (best.y - ny) * pull;
+    }
+    if (best !== h.hover) {
+      h.hover = best;
+      h.hoverT = now;
+      h.played = 0;
+      h.enteredAt = void 0;
+      h.sub = void 0;
+    }
+    const a = 1 - Math.exp(-dtS * 22);
+    const ox = h.x, oy = h.y;
+    let mx = (nx - h.x) * a, my = (ny - h.y) * a;
+    const step = Math.hypot(mx, my), cap = 4200 * dtS;
+    if (step > cap) {
+      mx *= cap / step;
+      my *= cap / step;
+    }
+    h.x += mx;
+    h.y += my;
+    const b = 1 - Math.exp(-dtS * 18);
+    h.vx += b * ((h.x - ox) / dtS - h.vx);
+    h.vy += b * ((h.y - oy) / dtS - h.vy);
+    interact(h, now);
+  }
+}
+const STRIKE_IN = 520, RESTRIKE = 1150, STROKE = 260;
+function interact(h, now) {
+  const speed = Math.hypot(h.vx, h.vy), i = h.hover;
+  h.dwellK = 1;
+  if (i) {
+    const sub2 = i.type === "tongue" ? tongueAt((h.x - i.x) * W / 1600 / S / i.r) : i.type === "chime" ? Math.max(0, Math.min(7, Math.round(((h.x - i.x) * W / 1600 / S + i.r * 0.85) / (i.r * 1.7) * 7))) : void 0;
+    const entered = h.enteredAt === void 0;
+    if (entered) h.enteredAt = now;
+    const upward = i.y > 560 && h.vy < -0.6 * speed;
+    const ready = now > (cooldown.get(i) || 0);
+    if (i.type === "ocean") {
+      if (speed > STROKE) {
+        i.sway = Math.min(1, Math.max((i.sway || 0) * 0.85, speed / 1500));
+        i.tilt = Math.max(-1, Math.min(1, (h.x - i.x) / i.r));
+        PLAYED.strokes++;
+      }
+    } else if (!upward && ready && (entered && speed > STRIKE_IN || speed > RESTRIKE)) {
+      strike(i, Math.min(1, 0.35 + speed / 2200), sub2);
+      cooldown.set(i, now + 300);
+      h.played = now;
+      h.sub = sub2;
+      PLAYED.strikes++;
+      PLAYED.by[i.name] = (PLAYED.by[i.name] || 0) + 1;
+    } else if ((i.type === "tongue" || i.type === "chime") && sub2 !== h.sub && h.sub !== void 0 && speed > STROKE) {
+      strike(i, 0.45 + Math.min(0.4, speed / 3e3), sub2);
+      h.played = now;
+      PLAYED.strokes++;
+    }
+    if (i.type === "tongue" || i.type === "chime") h.sub = sub2;
+    if (["crystal", "tibetan", "gong"].includes(i.type)) {
+      const key = i.name + i.x, ang = Math.atan2(h.y - i.y, h.x - i.x);
+      if (h.spinAng[key] !== void 0 && speed > STROKE * 0.6) {
+        let da = ang - h.spinAng[key];
+        if (da > Math.PI) da -= 2 * Math.PI;
+        if (da < -Math.PI) da += 2 * Math.PI;
+        h.spin[key] = (h.spin[key] || 0) * 0.85 + Math.abs(da * 60) * 0.15;
+      } else h.spin[key] = (h.spin[key] || 0) * 0.9;
+      h.spinAng[key] = ang;
+      if ((h.spin[key] || 0) > 1.5) {
+        i.bodySing = Math.max(i.bodySing, Math.min(1, 0.3 + h.spin[key] / 8));
+        PLAYED.sings++;
+      }
+    }
+  } else {
+    h.enteredAt = void 0;
+    h.sub = void 0;
+  }
+}
+function drawBody(now) {
+  if (!bodyLive) return;
+  const X = (x) => x * W / 1600, Y = (y) => y * H / 1e3;
+  for (const [k, h] of Object.entries(HANDS)) {
+    const el = bodyPts[k === "rHand" ? "rForearm" : "lForearm"];
+    let ang = el ? Math.atan2(h.y - el[1], h.x - el[0]) : -Math.PI / 2;
+    h.ang = h.ang === void 0 ? ang : h.ang + Math.atan2(Math.sin(ang - h.ang), Math.cos(ang - h.ang)) * 0.2;
+    drawHand(X(h.x), Y(h.y), h.ang, k === "lHand", h, now);
+  }
+}
+function drawHand(x, y, ang, isLeft, h, now) {
+  const sz = 84 * S, col = h.color, speed = Math.hypot(h.vx, h.vy);
+  h.trail = h.trail || [];
+  if (speed > 300) h.trail.push({ x, y, a: 1, r: (1 + Math.random() * 2) * S, dx: (Math.random() - 0.5) * 2 * S, dy: (Math.random() - 0.5) * 2 * S });
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  for (let i = h.trail.length - 1; i >= 0; i--) {
+    const p = h.trail[i];
+    p.a *= 0.93;
+    p.x += p.dx;
+    p.y += p.dy;
+    if (p.a < 0.03) {
+      h.trail.splice(i, 1);
+      continue;
+    }
+    ctx.fillStyle = hexA(col, p.a * 0.8);
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r, 0, 6.283);
+    ctx.fill();
+  }
+  if (window.BP_TV && ctx !== handCtx) {
+    const key = col + sz + isLeft, R = Math.ceil(sz * 2.4);
+    let c = HAND_BMP[key];
+    if (!c) {
+      c = HAND_BMP[key] = document.createElement("canvas");
+      c.width = c.height = 2 * R;
+      const main = ctx;
+      ctx = handCtx = c.getContext("2d");
+      try {
+        drawHand(R, R, -Math.PI / 2, isLeft, { color: col, vx: 0, vy: 0, trail: [] }, now);
+      } finally {
+        ctx = main;
+      }
+    }
+    ctx.translate(x, y);
+    ctx.rotate(ang + Math.PI / 2);
+    ctx.drawImage(c, -R, -R);
+    ctx.restore();
+    return;
+  }
+  const halo = ctx.createRadialGradient(x, y, 0, x, y, sz * 2.4);
+  halo.addColorStop(0, hexA(col, 0.28));
+  halo.addColorStop(1, hexA(col, 0));
+  ctx.fillStyle = halo;
+  ctx.beginPath();
+  ctx.arc(x, y, sz * 2.4, 0, 6.283);
+  ctx.fill();
+  ctx.translate(x, y);
+  ctx.rotate(ang + Math.PI / 2);
+  if (isLeft) ctx.scale(-1, 1);
+  const shape = new Path2D();
+  shape.roundRect(-sz * 0.42, -sz * 0.35, sz * 0.84, sz * 0.78, sz * 0.22);
+  const F = [[-0.3, 0.58, -0.1], [-0.1, 0.66, -0.03], [0.1, 0.62, 0.03], [0.29, 0.48, 0.11]];
+  const tips = [];
+  for (const [fx, len, tilt] of F) {
+    const w = sz * 0.17, bx = fx * sz, by = -sz * 0.3, L2 = len * sz;
+    const ex = bx + Math.sin(tilt) * L2, ey = by - Math.cos(tilt) * L2;
+    const f = new Path2D();
+    f.moveTo(bx, by);
+    f.lineTo(ex, ey);
+    shape.addPath(capsule(bx, by, ex, ey, w / 2));
+    tips.push([ex, ey]);
+  }
+  const tx0 = -sz * 0.4, ty0 = sz * 0.12, tx1 = -sz * 0.78, ty1 = -sz * 0.28;
+  shape.addPath(capsule(tx0, ty0, tx1, ty1, sz * 0.095));
+  tips.push([tx1, ty1]);
+  const body = ctx.createLinearGradient(0, sz * 0.5, 0, -sz);
+  body.addColorStop(0, hexA(col, 0.18));
+  body.addColorStop(0.55, hexA(col, 0.32));
+  body.addColorStop(1, hexA(col, 0.5));
+  ctx.fillStyle = body;
+  ctx.fill(shape, "nonzero");
+  ctx.strokeStyle = hexA(col, 0.9);
+  ctx.lineWidth = 2.2 * S;
+  ctx.stroke(shape);
+  for (const [ex, ey] of tips) {
+    const g = ctx.createRadialGradient(ex, ey, 0, ex, ey, sz * 0.22);
+    g.addColorStop(0, "rgba(255,255,255,0.9)");
+    g.addColorStop(0.35, hexA(col, 0.7));
+    g.addColorStop(1, hexA(col, 0));
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(ex, ey, sz * 0.22, 0, 6.283);
+    ctx.fill();
+  }
+  const pg = ctx.createRadialGradient(0, sz * 0.05, 0, 0, sz * 0.05, sz * 0.4);
+  pg.addColorStop(0, "rgba(255,255,255,0.55)");
+  pg.addColorStop(1, hexA(col, 0));
+  ctx.fillStyle = pg;
+  ctx.beginPath();
+  ctx.arc(0, sz * 0.05, sz * 0.4, 0, 6.283);
+  ctx.fill();
+  ctx.restore();
+}
+const HAND_BMP = {};
+let handCtx = null;
+function capsule(x0, y0, x1, y1, r) {
+  const p = new Path2D(), a = Math.atan2(y1 - y0, x1 - x0);
+  p.arc(x1, y1, r, a - Math.PI / 2, a + Math.PI / 2);
+  p.arc(x0, y0, r, a + Math.PI / 2, a + Math.PI * 1.5);
+  p.closePath();
+  return p;
+}
+let started = false, liveSince = 0, lastLiveAt = 0;
+function loop(now) {
+  BodyMovin.update(now);
+  NoMouse.tick(now, !started);
+  updateBody(now);
+  updateSinging();
+  updateOcean();
+  draw(now);
+  if (!CALIB.on) drawBody(now);
+  drawCalib(now);
+  requestAnimationFrame(loop);
+}
+function startGame(how) {
+  if (started) return;
+  started = true;
+  window.__startedBy = how;
+  audioInit();
+  document.getElementById("start").style.display = "none";
+  document.body.classList.add("on");
+  if (BodyMovin.howTo && BodyMovin.howTo.hide) BodyMovin.howTo.hide();
+  setTimeout(() => document.getElementById("hint").style.opacity = 0, 1e4);
+  strike(INST[0], 0.6);
+}
+document.getElementById("start").onclick = () => startGame("click");
+document.getElementById("go").onclick = (e) => {
+  e.stopPropagation();
+  startGame(e.isTrusted ? "click" : "hover");
+};
+addEventListener("keydown", (e) => {
+  if (!started && (e.key === "Enter" || e.key === " ")) {
+    e.preventDefault();
+    startGame("key");
+  }
+});
+document.getElementById("bpHome").href = BP_DIR + "index.html";
+BodyMovin.start();
+for (const name of ["drone", "rain", "ocean"]) document.getElementById(name).onclick = () => toggleBed(name);
+document.getElementById("breath").onclick = (e) => {
+  breathOn = !breathOn;
+  breathT0 = performance.now();
+  document.getElementById("breath").classList.toggle("on", breathOn);
+};
+const SND = { breath: "BREATHE", drone: "DRONE", rain: "RAIN", ocean: "OCEAN" };
+const isOn = (id) => document.getElementById(id).classList.contains("on");
+const sndOpt = (id) => ({ id, label: SND[id], sub: isOn(id) ? "ON now" : "off" });
+function pickSounds() {
+  const firstOn = Object.keys(SND).find(isOn);
+  BodyMovin.pick({
+    title: "Background sounds",
+    sub: "Hold one to turn it on or off",
+    value: firstOn === "rain" || firstOn === "ocean" ? "more" : firstOn,
+    onCancel: () => {
+    },
+    options: [sndOpt("breath"), sndOpt("drone"), { id: "more", label: "RAIN · OCEAN", sub: "pick next" }],
+    onPick: (id) => {
+      if (id !== "more") return document.getElementById(id).click();
+      BodyMovin.pick({
+        title: "Background sounds",
+        sub: "Hold one to turn it on or off",
+        value: isOn("ocean") && !isOn("rain") ? "ocean" : "rain",
+        onCancel: () => {
+        },
+        options: [sndOpt("rain"), sndOpt("ocean")],
+        onPick: (v) => document.getElementById(v).click()
+      });
+    }
+  });
+}
+document.getElementById("sounds").onclick = (e) => {
+  e.stopPropagation();
+  audioInit();
+  pickSounds();
+};
+addEventListener("resize", size);
+size();
+requestAnimationFrame(loop);
+if (new URLSearchParams(location.search).has("tv")) setTimeout(() => startGame("tv"), 800);
+window.__sb = { INST, strike, PLAYED, HANDS, L: () => L, started: () => started, breath: () => breathOn, beds: () => Object.keys(beds), live: () => bodyLive };
+</script>
+
+<script type="module" src="_lg/soundbath-0.js"></script>
+</body>
+</html>

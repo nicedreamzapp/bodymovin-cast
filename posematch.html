@@ -1,0 +1,1825 @@
+<!doctype html>
+<html>
+<head>
+<script src="_lg/polyfills.js"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Pose Party · Body Movin'</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #07021a; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
+  canvas { display: block; position: fixed; top:0;right:0;bottom:0;left:0; width: 100vw; height: 100vh; }
+  #c { z-index: 2; }
+</style>
+<style id="ui-phone-scores">@media (max-width:600px){html:has(.bphs-wrap) #bp-cam{visibility:hidden}}</style><!-- phone: the high-score card is nearly full width, so the live camera steps away while it is up -->
+</head>
+<body>
+
+<canvas id="gl"></canvas>
+<canvas id="c"></canvas>
+<script src="body.js"></script>
+<script>BodyMovin.pauseHide = "#c";
+</script>
+<script>BodyMovin.realSelf = { view: "mirror", outfit: "casual" };
+</script>
+<script>BodyMovin.menuBtnStyle = "top:max(10px,1.8vmin);left:calc(max(10px,1.8vmin) + max(108px,15vmin) + max(8px,1.2vmin));width:max(108px,15vmin);height:max(36px,5.6vmin);min-height:0;padding:0;border-radius:999px;border:1px solid rgba(255,255,255,.18);background:rgba(10,12,24,.55);color:#fff;font:800 max(14px,1.9vmin) -apple-system,system-ui,sans-serif;letter-spacing:.06em;opacity:1";
+BodyMovin.musicBtnStyle = "top:max(10px,1.8vmin);left:calc(max(10px,1.8vmin) + 2 * max(108px,15vmin) + 2 * max(8px,1.2vmin));width:max(36px,5.6vmin);height:max(36px,5.6vmin);min-width:0;min-height:0;border:1px solid rgba(255,255,255,.18);background:rgba(10,12,24,.55);color:#fff;opacity:1";
+</script>
+<script src="howto.js"></script>
+<script src="scores.js"></script>
+<script>{
+  const vm = Math.min(innerWidth, innerHeight) / 100, below = (Math.max(10, 1.8 * vm) + Math.max(36, 5.6 * vm) + Math.max(8, 1.2 * vm)) / innerHeight;
+  BodyMovin.howTo({
+    title: "POSE PARTY",
+    corner: false,
+    top: below,
+    bottom: innerWidth < 600 ? 0.4 : 0.73,
+    moves: [{ anim: "starjump", text: "Copy the dancer all the way: arms straight, feet wide" }, { anim: "kneeup", text: "Lift the knee or leg the card shows" }, { anim: "squat", text: "Squat low and touch your toes" }]
+  });
+}
+</script>
+<script>BodyMovin.needs = "full";
+</script>
+<script>const GAME = "posematch";
+const Q = new URLSearchParams(location.search), TV = Q.has("tv"), MUTE = Q.has("mute");
+const cv = document.getElementById("c");
+let ctx = cv.getContext("2d");
+let W, H, U, DPR;
+function size() {
+  DPR = Math.min(2, devicePixelRatio || 1);
+  W = cv.width = Math.round(innerWidth * DPR);
+  H = cv.height = Math.round(innerHeight * DPR);
+  U = Math.min(W, H);
+}
+addEventListener("resize", size);
+size();
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v)), lerp = (a, b, t) => a + (b - a) * t;
+const FONT = '-apple-system, "SF Pro Display", "Segoe UI", system-ui, sans-serif';
+const HC = BodyMovin.handColor;
+const TVM = !!window.BP_TV, TWC = /* @__PURE__ */ new Map();
+function textW(font, sp, text, set) {
+  const k = font + "|" + sp + "|" + text;
+  let w = TWC.get(k);
+  if (w === void 0) {
+    if (TWC.size > 800) TWC.clear();
+    if (set) ctx.font = font;
+    w = ctx.measureText(text).width;
+    TWC.set(k, w);
+  }
+  return w;
+}
+const hexA = (hex, a) => {
+  const n = parseInt(hex.slice(1), 16);
+  return "rgba(".concat(n >> 16, ",").concat(n >> 8 & 255, ",").concat(n & 255, ",").concat(clamp(a, 0, 1), ")");
+};
+const BPM = 110, BEAT = 60 / BPM;
+const INTRO = 8;
+const PLAY_BARS = Math.max(2, +Q.get("bars") || 32);
+const LAST_CARD = INTRO + PLAY_BARS * 4 - 1, END_BEAT = INTRO + PLAY_BARS * 4 + 4;
+const LEAD = 8;
+let ac = null, master = null, musicBus = null, noiseBuf = null, verbIn = null;
+function audioInit() {
+  if (ac) {
+    if (ac.state === "suspended") ac.resume();
+    return;
+  }
+  try {
+    ac = new (window.AudioContext || window.webkitAudioContext)();
+    master = ac.createGain();
+    master.gain.value = MUTE ? 0 : 0.6;
+    const comp = ac.createDynamicsCompressor();
+    comp.threshold.value = -14;
+    comp.ratio.value = 4;
+    comp.attack.value = 5e-3;
+    comp.release.value = 0.2;
+    master.connect(comp);
+    comp.connect(ac.destination);
+    musicBus = ac.createGain();
+    musicBus.gain.value = 0.85;
+    musicBus.connect(master);
+    BodyMovin.onMusic((off) => {
+      musicBus.gain.value = off ? 0 : 0.85;
+    });
+    noiseBuf = ac.createBuffer(1, ac.sampleRate * 2, ac.sampleRate);
+    const d = noiseBuf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    const len = ac.sampleRate * 1.6, ir = ac.createBuffer(2, len, ac.sampleRate);
+    for (let ch = 0; ch < 2; ch++) {
+      const c = ir.getChannelData(ch);
+      for (let i = 0; i < len; i++) c[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
+    }
+    const verb = ac.createConvolver();
+    verb.buffer = ir;
+    verbIn = ac.createGain();
+    const wet = ac.createGain();
+    wet.gain.value = 0.25;
+    verbIn.connect(verb);
+    verb.connect(wet);
+    wet.connect(master);
+  } catch (e) {
+    ac = null;
+  }
+}
+const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
+function osc(dest, type, f, t, dur, vol, { attack = 4e-3, detune = 0, slide = 0, send = 0 } = {}) {
+  const o = ac.createOscillator(), g = ac.createGain();
+  o.type = type;
+  o.frequency.setValueAtTime(f, t);
+  o.detune.value = detune;
+  if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(20, f * slide), t + dur);
+  g.gain.setValueAtTime(1e-4, t);
+  g.gain.exponentialRampToValueAtTime(vol, t + attack);
+  g.gain.exponentialRampToValueAtTime(1e-4, t + dur);
+  o.connect(g);
+  g.connect(dest);
+  if (send) {
+    const s = ac.createGain();
+    s.gain.value = send;
+    g.connect(s);
+    s.connect(verbIn);
+  }
+  o.start(t);
+  o.stop(t + dur + 0.05);
+  return o;
+}
+function noise(dest, t, dur, type, f, q, vol, attack = 2e-3) {
+  const n = ac.createBufferSource(), fl = ac.createBiquadFilter(), g = ac.createGain();
+  n.buffer = noiseBuf;
+  fl.type = type;
+  fl.frequency.value = f;
+  fl.Q.value = q;
+  g.gain.setValueAtTime(1e-4, t);
+  g.gain.exponentialRampToValueAtTime(vol, t + attack);
+  g.gain.exponentialRampToValueAtTime(1e-4, t + dur);
+  n.connect(fl);
+  fl.connect(g);
+  g.connect(dest);
+  n.start(t, Math.random());
+  n.stop(t + dur + 0.05);
+}
+const CHORDS = [[57, 60, 64, 69], [53, 57, 60, 65], [55, 60, 64, 67], [55, 59, 62, 67]], ROOTS = [45, 41, 48, 43];
+const DR = {
+  kick(t) {
+    osc(musicBus, "sine", 150, t, 0.32, 0.9, { slide: 0.28 });
+    osc(musicBus, "triangle", 60, t, 0.18, 0.35);
+  },
+  clap(t) {
+    noise(musicBus, t, 0.16, "bandpass", 1500, 0.9, 0.42);
+    noise(musicBus, t + 0.012, 0.2, "bandpass", 1100, 0.7, 0.3);
+    osc(musicBus, "triangle", 220, t, 0.08, 0.12);
+  },
+  hat(t, open, v = 1) {
+    noise(musicBus, t, open ? 0.2 : 0.045, "highpass", 8e3, 0.7, (open ? 0.12 : 0.09) * v);
+  },
+  bass(t, m, dur) {
+    const o = ac.createOscillator(), o2 = ac.createOscillator(), f = ac.createBiquadFilter(), g = ac.createGain();
+    o.type = "sawtooth";
+    o2.type = "square";
+    o.frequency.value = mtof(m);
+    o2.frequency.value = mtof(m - 12);
+    f.type = "lowpass";
+    f.Q.value = 6;
+    f.frequency.setValueAtTime(1400, t);
+    f.frequency.exponentialRampToValueAtTime(220, t + dur);
+    g.gain.setValueAtTime(1e-4, t);
+    g.gain.exponentialRampToValueAtTime(0.32, t + 8e-3);
+    g.gain.exponentialRampToValueAtTime(1e-4, t + dur);
+    o.connect(f);
+    o2.connect(f);
+    f.connect(g);
+    g.connect(musicBus);
+    o.start(t);
+    o2.start(t);
+    o.stop(t + dur + 0.05);
+    o2.stop(t + dur + 0.05);
+  },
+  stab(t, notes, vol = 0.07) {
+    const f = ac.createBiquadFilter(), g = ac.createGain();
+    f.type = "lowpass";
+    f.frequency.setValueAtTime(3200, t);
+    f.frequency.exponentialRampToValueAtTime(900, t + 0.2);
+    g.gain.value = 1;
+    f.connect(g);
+    g.connect(musicBus);
+    const s = ac.createGain();
+    s.gain.value = 0.5;
+    g.connect(s);
+    s.connect(verbIn);
+    for (const m of notes) {
+      osc(f, "sawtooth", mtof(m), t, 0.22, vol, { detune: -7 });
+      osc(f, "sawtooth", mtof(m), t, 0.22, vol, { detune: 7 });
+    }
+  },
+  pad(t, notes, dur) {
+    for (const m of notes) osc(musicBus, "triangle", mtof(m), t, dur, 0.03, { attack: 0.3, send: 0.6 });
+  },
+  pluck(t, m, v = 0.06) {
+    osc(musicBus, "square", mtof(m), t, 0.14, v, { send: 0.5 });
+    osc(musicBus, "sine", mtof(m + 12), t, 0.2, v * 0.7);
+  }
+};
+function playStep(step, t) {
+  const bar = Math.floor(step / 16), s = step % 16, ci = bar % 4, chord = CHORDS[ci], root = ROOTS[ci];
+  const intro = step < INTRO * 4, outro = step >= (INTRO + PLAY_BARS * 4) * 4;
+  const energy = intro ? 0 : clamp((step / 4 - INTRO) / (PLAY_BARS * 4), 0, 1);
+  if (outro) {
+    if (step === (INTRO + PLAY_BARS * 4) * 4) {
+      DR.pad(t, chord.map((m) => m + 12), 2.5);
+      DR.kick(t);
+      noise(musicBus, t, 1.6, "highpass", 5e3, 0.5, 0.16);
+    }
+    return;
+  }
+  if (s % 4 === 0) DR.kick(t);
+  if (intro) {
+    if (s === 0) DR.pad(t, chord, BEAT * 4);
+    if (s % 4 === 2) DR.hat(t, false);
+    return;
+  }
+  if (s === 4 || s === 12) DR.clap(t);
+  if (s % 4 === 2) DR.hat(t, true);
+  else if (energy > 0.25 && s % 2 === 1) DR.hat(t, false, 0.6);
+  if ([0, 3, 6, 8, 10, 11, 14].includes(s)) DR.bass(t, s === 6 || s === 14 ? root + 12 : root, s === 0 || s === 8 ? 0.2 : 0.12);
+  if (s % 4 === 2) DR.stab(t, chord);
+  if (s === 0) DR.pad(t, chord, BEAT * 4);
+  if (energy > 0.45) DR.pluck(t, chord[s * 3 % 4] + 12 + (s % 8 === 7 ? 12 : 0), 0.035);
+  if (energy > 0.75 && s === 15 && bar % 2 === 1) noise(musicBus, t, BEAT * 0.9, "bandpass", 3e3, 0.6, 0.06, BEAT * 0.8);
+}
+const SFX = {
+  perfect(c) {
+    if (!ac) return;
+    const t = ac.currentTime, b = 72 + Math.min(7, Math.floor(c / 4));
+    [0, 4, 7, 12].forEach((k, i) => osc(master, "triangle", mtof(b + k), t + i * 0.045, 0.35, 0.11, { send: 0.8 }));
+    noise(master, t, 0.4, "highpass", 6e3, 0.5, 0.05);
+  },
+  great() {
+    if (!ac) return;
+    const t = ac.currentTime;
+    [0, 7].forEach((k, i) => osc(master, "triangle", mtof(76 + k), t + i * 0.05, 0.3, 0.1, { send: 0.6 }));
+  },
+  ok() {
+    if (!ac) return;
+    osc(master, "triangle", mtof(72), ac.currentTime, 0.25, 0.09, { send: 0.4 });
+  },
+  miss() {
+    if (!ac) return;
+    const t = ac.currentTime;
+    osc(master, "sawtooth", 180, t, 0.3, 0.07, { slide: 0.55 });
+  },
+  cheer() {
+    if (!ac) return;
+    const t = ac.currentTime;
+    for (let i = 0; i < 26; i++) noise(master, t + Math.random() * 0.5, 0.12 + Math.random() * 0.25, "bandpass", 900 + Math.random() * 2500, 4, 0.05);
+    osc(master, "square", mtof(84), t, 0.12, 0.05);
+    osc(master, "square", mtof(88), t + 0.1, 0.12, 0.05);
+    osc(master, "square", mtof(91), t + 0.2, 0.3, 0.05, { send: 0.7 });
+  },
+  tick(hi) {
+    if (!ac) return;
+    osc(master, "square", hi ? 1320 : 880, ac.currentTime, hi ? 0.3 : 0.09, 0.07);
+  },
+  click() {
+    if (!ac) return;
+    osc(master, "triangle", 990, ac.currentTime, 0.12, 0.1);
+  },
+  snap() {
+    if (!ac) return;
+    const t = ac.currentTime;
+    noise(master, t, 0.05, "highpass", 3e3, 0.7, 0.25);
+    noise(master, t + 0.07, 0.06, "highpass", 2500, 0.7, 0.18);
+    [0, 4, 7].forEach((k, i) => osc(master, "triangle", mtof(79 + k), t + 0.05 + i * 0.03, 0.4, 0.07, { send: 0.8 }));
+  },
+  end() {
+    if (!ac) return;
+    const t = ac.currentTime;
+    [60, 64, 67, 72, 76].forEach((m, i) => osc(master, "triangle", mtof(m), t + i * 0.1, 0.8, 0.1, { send: 0.8 }));
+  }
+};
+let songT0 = 0, nextStep = 0, schedTimer = null;
+const songNow = () => (performance.now() - songT0) / 1e3;
+function scheduler() {
+  const STEP = BEAT / 4, now = songNow();
+  while (nextStep * STEP < now + 0.12) {
+    const t = nextStep * STEP;
+    if (ac && ac.state === "running" && t > now - 0.02) {
+      try {
+        playStep(nextStep, ac.currentTime + Math.max(0, t - now) + 0.02);
+      } catch (e) {
+        console.warn(e);
+      }
+    }
+    nextStep++;
+  }
+}
+const RX = 0.13, RY = 0.2;
+const ARM = (a, o) => Object.assign({ a, tol: 22 }, o), FREE = (a) => ({ a, free: true });
+const MOVES = {
+  reach: { name: "REACH UP", say: "REACH UP HIGH", arms: { l: ARM(90), r: ARM(90) } },
+  wide: { name: "ARMS OUT", say: "ARMS OUT WIDE", arms: { l: ARM(0), r: ARM(0) } },
+  discoL: { name: "DISCO", say: "LEFT ARM UP HIGH", side: "l", arms: { l: ARM(55), r: ARM(-50, { tol: 26 }) } },
+  discoR: { name: "DISCO", say: "RIGHT ARM UP HIGH", side: "r", arms: { l: ARM(-50, { tol: 26 }), r: ARM(55) } },
+  kneeL: { name: "LEFT KNEE", say: "LIFT YOUR LEFT KNEE", side: "l", knee: "l", big: 1, arms: { l: FREE(0), r: FREE(0) } },
+  kneeR: { name: "RIGHT KNEE", say: "LIFT YOUR RIGHT KNEE", side: "r", knee: "r", big: 1, arms: { l: FREE(0), r: FREE(0) } },
+  squat: { name: "SQUAT", say: "SQUAT DOWN LOW", squat: 1, big: 1, arms: { l: FREE(-15), r: FREE(-15) } },
+  star: { name: "STAR", say: "BIG STAR! ARMS UP, FEET WIDE", wide: 1, big: 1, arms: { l: ARM(45, { tol: 25 }), r: ARM(45, { tol: 25 }) } },
+  tiptoe: { name: "TIPTOES", say: "REACH UP ON YOUR TIPTOES", tip: 1, arms: { l: ARM(90), r: ARM(90) } },
+  toes: { name: "TOUCH TOES", say: "TOUCH YOUR TOES", toes: [["l", "l"], ["r", "r"]], big: 1 },
+  legL: { name: "LEFT LEG OUT", say: "LEFT LEG OUT TO THE SIDE", side: "l", legOut: "l", big: 1, arms: { l: FREE(15), r: FREE(15) } },
+  legR: { name: "RIGHT LEG OUT", say: "RIGHT LEG OUT TO THE SIDE", side: "r", legOut: "r", big: 1, arms: { l: FREE(15), r: FREE(15) } },
+  lungeL: { name: "LUNGE LEFT", say: "BIG STEP LEFT, BEND THAT KNEE", side: "l", lunge: "l", big: 1, arms: { l: FREE(0), r: FREE(0) } },
+  lungeR: { name: "LUNGE RIGHT", say: "BIG STEP RIGHT, BEND THAT KNEE", side: "r", lunge: "r", big: 1, arms: { l: FREE(0), r: FREE(0) } },
+  sideL: { name: "SIDE STRETCH", say: "LEAN LEFT, RIGHT ARM OVER", side: "l", lean: "l", big: 1, arms: { l: FREE(-75), r: ARM(125, { tol: 28 }) } },
+  sideR: { name: "SIDE STRETCH", say: "LEAN RIGHT, LEFT ARM OVER", side: "r", lean: "r", big: 1, arms: { l: ARM(125, { tol: 28 }), r: FREE(-75) } },
+  crossR: { name: "R HAND, L TOE", say: "RIGHT HAND TO YOUR LEFT TOE", side: "r", toes: [["r", "l"]], big: 1, arms: { l: FREE(110) } },
+  crossL: { name: "L HAND, R TOE", say: "LEFT HAND TO YOUR RIGHT TOE", side: "l", toes: [["l", "r"]], big: 1, arms: { r: FREE(110) } },
+  kneeUpL: { name: "KNEE + REACH", say: "LEFT KNEE UP, ARMS UP", side: "l", knee: "l", big: 1, arms: { l: ARM(90, { tol: 25 }), r: ARM(90, { tol: 25 }) } },
+  kneeUpR: { name: "KNEE + REACH", say: "RIGHT KNEE UP, ARMS UP", side: "r", knee: "r", big: 1, arms: { l: ARM(90, { tol: 25 }), r: ARM(90, { tol: 25 }) } },
+  bloom: { name: "SQUAT + REACH", say: "SQUAT LOW, ARMS UP HIGH", squat: 1, big: 1, arms: { l: ARM(90, { tol: 25 }), r: ARM(90, { tol: 25 }) } },
+  jump: { name: "JUMP!", say: "JUMP!", jump: 1, arms: { l: FREE(60), r: FREE(60) } },
+  planeL: { name: "AIRPLANE", say: "ARMS OUT, LEFT LEG OUT", side: "l", legOut: "l", big: 1, arms: { l: ARM(0), r: ARM(0) } },
+  planeR: { name: "AIRPLANE", say: "ARMS OUT, RIGHT LEG OUT", side: "r", legOut: "r", big: 1, arms: { l: ARM(0), r: ARM(0) } }
+};
+const SET = [
+  "reach",
+  "wide",
+  "discoL",
+  "discoR",
+  "kneeL",
+  "kneeR",
+  "squat",
+  "star",
+  "tiptoe",
+  "toes",
+  "legL",
+  "legR",
+  "lungeL",
+  "lungeR",
+  "sideL",
+  "sideR",
+  "planeL",
+  "planeR",
+  "crossR",
+  "crossL",
+  "kneeUpL",
+  "kneeUpR",
+  "bloom",
+  "jump",
+  "star"
+];
+const GAP = { kneeUpL: 2, bloom: 3, jump: 3 };
+const EASY = {
+  legL: "kneeL",
+  legR: "kneeR",
+  lungeL: "kneeL",
+  lungeR: "kneeR",
+  planeL: "kneeL",
+  planeR: "kneeR",
+  crossR: "toes",
+  crossL: "toes",
+  sideL: "discoL",
+  sideR: "discoR",
+  kneeUpL: "kneeL",
+  kneeUpR: "kneeR",
+  bloom: "squat",
+  star: "wide",
+  tiptoe: "reach"
+};
+window.__moves = MOVES;
+const POSES = MOVES;
+const SAFE_POSE = MOVES.reach;
+function zFromSpec(p) {
+  const out = [];
+  for (const [i, s] of [[0, "l"], [1, "r"]]) {
+    const toe = p.toes && p.toes.find((t) => t[0] === s), a = p.arms && p.arms[s];
+    if (toe) {
+      out.push([toe[1] === "l" ? 0.38 : 0.62, 0.85]);
+      continue;
+    }
+    if (!a || a.free) {
+      out.push(REST[i]);
+      continue;
+    }
+    const r = a.a * Math.PI / 180, sg = s === "l" ? -1 : 1;
+    out.push([clamp(0.5 + sg * (0.18 + 0.32 * Math.cos(r)), 0.08, 0.92), clamp(0.46 - 0.33 * Math.sin(r), 0.1, 0.85)]);
+  }
+  return out;
+}
+const zOf = (p) => p && Array.isArray(p.z) && p.z.length === 2 && p.z[0] && p.z[1] ? p.z : p && (p.arms || p.toes) ? p.z = zFromSpec(p) : zFromSpec(SAFE_POSE);
+const POSE_COL = (p) => !p ? "#7cf0ff" : p.free || p.echo ? "#8dff9a" : p.jump ? "#ff6fb5" : p.side === "l" ? HC.left : p.side === "r" ? HC.right : p.squat ? "#ffc94a" : "#7cf0ff";
+const ramp = (v, a, b) => clamp((v - a) / (b - a), 0, 1);
+const BR = { ok: false, full: {}, armLock: false, S: 0, ratioTL: 0, abn: 0, armRef: 1, thighStand: 0.72, legStand: 1.12, hipH: 1.4, floor: [], P: null };
+BR.update = function(dt) {
+  const I = BodyMovin.img, J = BodyMovin.joints, now = performance.now();
+  let P = null;
+  if (I && I.lShoulder && I.rShoulder && I.lHip && I.rHip && now - (BodyMovin.imgAt || 0) < 700) P = I;
+  else if (J && J.lShoulder && J.rShoulder && J.lHip && J.rHip) {
+    P = {};
+    for (const k2 in J) P[k2] = [J[k2][0], -J[k2][1]];
+  }
+  BR.ok = !!P && BodyMovin.live && !BodyMovin.mouse && !BodyMovin.simulating;
+  if (!BR.ok) return;
+  BR.P = P;
+  const ch = [(P.lShoulder[0] + P.rShoulder[0]) / 2, (P.lShoulder[1] + P.rShoulder[1]) / 2], hp = [(P.lHip[0] + P.rHip[0]) / 2, (P.lHip[1] + P.rHip[1]) / 2];
+  const T = Math.hypot(ch[0] - hp[0], ch[1] - hp[1]);
+  BR.ch = ch;
+  BR.hp = hp;
+  const feet = !!(P.lFoot && P.rFoot), L = feet ? (P.lFoot[1] + P.rFoot[1]) / 2 - hp[1] : 0, tl = L > 1e-3 ? T / L : 0;
+  const up = (hp[1] - ch[1]) / Math.max(1e-4, T);
+  if (!BR.S) {
+    BR.S = T;
+    BR.ratioTL = tl || 0.66;
+  }
+  const normal = up > 0.85 && (!tl || Math.abs(tl / BR.ratioTL - 1) < 0.18);
+  BR.normal = normal;
+  const k = (tau) => 1 - Math.exp(-dt / tau);
+  if (normal) {
+    BR.abn = 0;
+    BR.S += (T - BR.S) * k(0.5);
+    if (tl) BR.ratioTL += (tl - BR.ratioTL) * k(4);
+  } else if ((BR.abn += dt) > 6) {
+    BR.S += (T - BR.S) * k(1.5);
+    if (tl) BR.ratioTL += (tl - BR.ratioTL) * k(1.5);
+  }
+  const S = BR.S;
+  if (normal) {
+    if (!BR.armLock) for (const s of "lr") {
+      const a = BR.arm(s);
+      if (a && a.str > 0.95 && a.ang < -60) BR.armRef += (a.reach - BR.armRef) * k(3);
+    }
+    BR.armRef = clamp(BR.armRef, 0.85, 1.25);
+    if (feet && P.lKnee && P.rKnee && Math.abs(P.lFoot[1] - P.rFoot[1]) / S < 0.1) {
+      const th = (P.lKnee[1] - P.lHip[1] + (P.rKnee[1] - P.rHip[1])) / 2, sh = (P.lFoot[1] - P.lKnee[1] + (P.rFoot[1] - P.rKnee[1])) / 2;
+      BR.thighStand = clamp(BR.thighStand + (th / S - BR.thighStand) * k(3), 0.45, 1);
+      if (sh > 1e-4) BR.legStand = clamp(BR.legStand + (th / sh - BR.legStand) * k(3), 0.8, 1.45);
+      BR.hipH = clamp(BR.hipH + (L / S - BR.hipH) * k(3), 1, 1.9);
+    }
+  }
+  if (feet) {
+    BR.floor.push([now, Math.max(P.lFoot[1], P.rFoot[1])]);
+    while (BR.floor.length && now - BR.floor[0][0] > 5e3) BR.floor.shift();
+  }
+};
+const SG = (s) => s === "l" ? 1 : -1, OTHER = (s) => s === "l" ? "r" : "l";
+BR.arm = (s) => {
+  const P = BR.P, Sh = P[s + "Shoulder"], E = P[s + "Forearm"], H2 = P[s + "Hand"];
+  if (!Sh || !H2) return null;
+  const dx = (H2[0] - Sh[0]) * SG(s), dy = Sh[1] - H2[1], d = Math.hypot(dx, dy);
+  const seg = E ? Math.hypot(E[0] - Sh[0], E[1] - Sh[1]) + Math.hypot(H2[0] - E[0], H2[1] - E[1]) : d;
+  return { ang: Math.atan2(dy, dx) * 180 / Math.PI, reach: d / BR.S, str: seg > 1e-6 ? d / seg : 1 };
+};
+const legsIn = () => !!(BR.P.lKnee && BR.P.rKnee && BR.P.lFoot && BR.P.rFoot);
+BR.knee = (s) => {
+  const P = BR.P, lift = 1 - (P[s + "Knee"][1] - P[s + "Hip"][1]) / BR.S / BR.thighStand, rise = (P[OTHER(s) + "Foot"][1] - P[s + "Foot"][1]) / BR.S;
+  return Math.max(ramp(lift, 0.15, 0.6), 0.9 * ramp(rise, 0.12, 0.5));
+};
+BR.legOut = (s) => {
+  const P = BR.P, F = P[s + "Foot"], Hs = P[s + "Hip"], ang = Math.atan2((F[0] - Hs[0]) * SG(s), Math.max(1e-4, F[1] - Hs[1])) * 180 / Math.PI;
+  const rise = (P[OTHER(s) + "Foot"][1] - F[1]) / BR.S;
+  return { q: ramp(ang, 8, 28), off: rise > 0.05 };
+};
+BR.feetW = () => Math.abs(BR.P.lFoot[0] - BR.P.rFoot[0]) / BR.S;
+BR.bendKnee = (s) => {
+  const P = BR.P, sh = P[s + "Foot"][1] - P[s + "Knee"][1];
+  return 1 - (P[s + "Knee"][1] - P[s + "Hip"][1]) / Math.max(1e-4, sh) / BR.legStand;
+};
+BR.squat = () => {
+  const P = BR.P, depth = (BR.bendKnee("l") + BR.bendKnee("r")) / 2, hipH = ((P.lFoot[1] + P.rFoot[1]) / 2 - BR.hp[1]) / BR.S, drop = 1 - hipH / BR.hipH;
+  return { q: ramp(Math.max(depth, drop * 1.3), 0.25, 0.6), knees: depth };
+};
+BR.toe = (h, f) => {
+  const H2 = BR.P[h + "Hand"], F = BR.P[f + "Foot"];
+  return H2 && F ? 1 - ramp(Math.hypot(H2[0] - F[0], H2[1] - F[1]) / BR.S, BR.full.toe || 0.35, 1.1) : 0;
+};
+BR.lean = (s) => ramp((BR.ch[0] - BR.hp[0]) * SG(s) / BR.S, 0.06, 0.28);
+BR.tip = () => {
+  if (BR.floor.length < 8 || !legsIn()) return 0;
+  const ys = BR.floor.map((f) => f[1]).sort((a, b) => a - b), base = ys[Math.floor(ys.length * 0.85)];
+  return ramp((base - Math.max(BR.P.lFoot[1], BR.P.rFoot[1])) / BR.S, 0.03, 0.09);
+};
+const angDiff = (a, b) => {
+  const d = Math.abs(a - b) % 360;
+  return d > 180 ? 360 - d : d;
+};
+function bodyJudge(p) {
+  const parts = [], add = (q2, hint2, limb2) => parts.push({ q: clamp(q2, 0, 1), hint: hint2, limb: limb2 }), S = (s) => s === "l" ? "L" : "R";
+  for (const s of "lr") {
+    const a = p.arms && p.arms[s];
+    if (!a || a.free || p.toes && p.toes.some((t) => t[0] === s)) continue;
+    const v = BR.arm(s);
+    if (!v) {
+      add(0, "", "arm" + S(s));
+      continue;
+    }
+    const dir = v.reach < 0.35 * BR.armRef ? 0 : 1 - ramp(angDiff(v.ang, a.a) - (a.tol || 22), 0, 35);
+    add(dir, a.a > 100 ? "ARM UP AND OVER!" : a.a > 60 ? "ARMS UP HIGH!" : a.a < -30 ? "ARM DOWN LOW!" : a.a > 20 ? "ARMS UP AND OUT!" : "ARMS OUT TO THE SIDE!", "arm" + S(s));
+    if (a.ext !== false) {
+      const e = Math.min(ramp(v.str, 0.8, 0.94), ramp(v.reach / BR.armRef, 0.72, 0.92));
+      add(e, v.str < 0.88 ? "STRAIGHTEN YOUR ARMS!" : "REACH FURTHER!", "arm" + S(s));
+    }
+  }
+  const legsNeeded = p.knee || p.legOut || p.squat || p.wide || p.lunge || p.toes || p.tip;
+  if (legsNeeded && !legsIn()) {
+    add(0, "", "core");
+  } else {
+    if (p.knee) add(BR.knee(p.knee), "KNEE HIGHER!", "leg" + S(p.knee));
+    if (p.legOut) {
+      const r = BR.legOut(p.legOut);
+      add(r.off ? r.q : Math.min(r.q, 0.45), r.off || r.q < 0.45 ? "LEG HIGHER!" : "LIFT YOUR FOOT UP!", "leg" + S(p.legOut));
+    }
+    if (p.squat) add(BR.squat().q, "SQUAT LOWER!", "legs");
+    const FW = BR.full.feet || 1.05;
+    if (p.wide) add(ramp(BR.feetW(), FW * 0.57, FW), "FEET WIDER!", "legs");
+    if (p.lunge) {
+      add(ramp(BR.feetW(), FW * 0.57, FW * 0.95), "STEP WIDER!", "legs");
+      add(ramp(BR.bendKnee(p.lunge), 0.2, 0.5), "BEND THAT KNEE!", "leg" + S(p.lunge));
+    }
+    if (p.toes) {
+      for (const [h, f] of p.toes) add(BR.toe(h, f), "REACH LOWER!", "arm" + S(h));
+      if (!p.squat) add(1 - ramp(BR.squat().knees, 0.4, 0.75), "KEEP YOUR LEGS STRAIGHT!", "legs");
+    }
+  }
+  if (p.lean) add(BR.lean(p.lean), "LEAN FURTHER!", "core");
+  if (!parts.length) return { q: 1, parts, hint: "" };
+  let min = 1, sum = 0, weak = null;
+  for (const x of parts) {
+    sum += x.q;
+    if (x.q < min) {
+      min = x.q;
+      weak = x;
+    }
+  }
+  let q = 0.35 * min + 0.65 * sum / parts.length, hint = weak && weak.q < 0.85 ? weak.hint : "";
+  if (p.tip) {
+    const tq = legsIn() ? BR.tip() : 0;
+    q = q * 0.8 + 0.2 * tq;
+    if (tq < 0.5 && !hint) hint = "UP ON YOUR TOES!";
+    parts.push({ q: tq, hint: "UP ON YOUR TOES!", limb: "legs" });
+  }
+  return { q, parts, hint };
+}
+function limbMatch(parts) {
+  var _a;
+  const m = { active: {} };
+  for (const x of parts) {
+    const ks = x.limb === "legs" ? ["legL", "legR"] : [x.limb];
+    for (const k of ks) {
+      m.active[k] = true;
+      m[k] = Math.min((_a = m[k]) != null ? _a : 1, x.q);
+    }
+  }
+  return m;
+}
+function captureSpec() {
+  const arms = {}, sp = { arms };
+  let away = 0;
+  for (const s of "lr") {
+    const a = BR.arm(s);
+    if (!a) continue;
+    const ext = a.reach > 0.85 * BR.armRef && a.str > 0.9;
+    if (a.reach > 0.55 * BR.armRef && a.ang > -55) {
+      arms[s] = ext ? { a: Math.round(a.ang), tol: 30 } : { a: Math.round(a.ang), tol: 30, ext: false };
+      away += ext ? 1 : 0.5;
+    } else arms[s] = { a: Math.round(clamp(a.ang, -90, 180)), free: true };
+  }
+  if (legsIn()) {
+    const kl = BR.knee("l"), kr = BR.knee("r"), ol = BR.legOut("l"), or = BR.legOut("r"), sq = BR.squat();
+    if (Math.max(kl, kr) > 0.6) {
+      sp.knee = kl > kr ? "l" : "r";
+      sp.big = 1;
+      away += 1.5;
+    } else if (ol.off && ol.q > 0.6 || or.off && or.q > 0.6) {
+      sp.legOut = (ol.off ? ol.q : 0) > (or.off ? or.q : 0) ? "l" : "r";
+      sp.big = 1;
+      away += 1.5;
+    }
+    if (sq.q > 0.6) {
+      sp.squat = 1;
+      sp.big = 1;
+      away += 1.5;
+    } else if (BR.feetW() > 0.95) {
+      sp.wide = 1;
+      away += 1;
+    }
+    const toes = [];
+    for (const h of "lr") {
+      const f = BR.toe(h, "l") > BR.toe(h, "r") ? "l" : "r";
+      if (BR.toe(h, f) > 0.6) toes.push([h, f]);
+    }
+    if (toes.length) {
+      sp.toes = toes;
+      sp.big = 1;
+      away += 1.5;
+    }
+  }
+  return { sp, away };
+}
+const COPY_AT = (Q.has("copyearly") ? [8] : [40, 88]).filter((p) => p + 16 <= PLAY_BARS * 4 - 2).map((p) => INTRO + p);
+const REST = [[0.18, 0.8], [0.84, 0.8]];
+let state = "title", score = 0, combo = 0, maxCombo = 0, counts, cards, nextCardBeat, lastPose, recent, judged, jumpTimes, endInfo, titleT0 = performance.now();
+let setI = 0, log = [], lastSnap = null, snaps = 0, flashCol = "255,230,255", flash = 0, shake = 0, popups = [], particles = [], confetti = [], titleAuto = TV;
+function resetRound() {
+  score = 0;
+  combo = 0;
+  maxCombo = 0;
+  counts = { perfect: 0, great: 0, ok: 0, miss: 0 };
+  cards = [];
+  nextCardBeat = INTRO;
+  lastPose = "";
+  recent = [];
+  judged = 0;
+  jumpTimes = [];
+  popups = [];
+  confetti = [];
+  endInfo = null;
+  lastSnap = null;
+  snaps = 0;
+  log = [];
+  setI = 0;
+}
+resetRound();
+let startedAt = -1e9;
+function startRound() {
+  if (state === "play") return;
+  if (performance.now() - startedAt < 800) return;
+  startedAt = performance.now();
+  audioInit();
+  SFX.click();
+  resetRound();
+  BodyMovin.activity.activeSec = 0;
+  BodyMovin.activity.kcal = 0;
+  state = "play";
+  songT0 = performance.now() + 250;
+  nextStep = 0;
+  if (BodyMovin.howTo && BodyMovin.howTo.hide) BodyMovin.howTo.hide();
+  clearInterval(schedTimer);
+  schedTimer = setInterval(scheduler, 25);
+}
+function goHome() {
+  audioInit();
+  SFX.click();
+  clearInterval(schedTimer);
+  setTimeout(() => location.href = "index.html", 160);
+}
+BodyMovin.on("jump", () => {
+  if (state === "play") jumpTimes.push(songNow());
+});
+BodyMovin.on("starjump", () => {
+  if (state === "play") jumpTimes.push(songNow());
+});
+const struggling = () => recent.slice(-4).filter((r) => r === "miss").length >= 2;
+const mkCard = (key, pose, beat) => ({ key, pose, beat, best: 0, done: false, res: null, fx: 0, lastQ: 0, hint: "", liveQ: 0, liveHint: "" });
+function spawnCards(songBeat) {
+  while (nextCardBeat <= LAST_CARD && nextCardBeat - songBeat < LEAD) {
+    if (COPY_AT.includes(nextCardBeat)) {
+      const sec2 = nextCardBeat;
+      const echo = [0, 1, 2, 3].map((i) => mkCard("echo", { name: "COPY", arms: { l: ARM(90), r: ARM(90) }, z: [[0.3, 0.3], [0.7, 0.3]], echo: true, pending: true }, sec2 + 8 + i * 2));
+      [0, 1, 2, 3].forEach((i) => {
+        const c = mkCard("free", { name: "YOUR MOVE", z: [[0.3, 0.3], [0.7, 0.3]], free: true }, sec2 + i * 2);
+        c.echo = echo[i];
+        c.n = i + 1;
+        cards.push(c);
+      });
+      cards.push(...echo);
+      nextCardBeat = sec2 + 16;
+      lastPose = "";
+      continue;
+    }
+    let k = SET[setI % SET.length];
+    setI++;
+    if (setI > SET.length && k === lastPose) {
+      k = SET[setI % SET.length];
+      setI++;
+    }
+    const hard = struggling() && EASY[k];
+    if (hard) k = EASY[k];
+    const pose = POSES[k] || SAFE_POSE;
+    cards.push(mkCard(k, pose, nextCardBeat));
+    lastPose = k;
+    const gap = hard ? 4 : GAP[k] || 4;
+    const was = nextCardBeat;
+    nextCardBeat += gap;
+    const sec = COPY_AT.find((b) => b > was && b < nextCardBeat);
+    if (sec) nextCardBeat = sec;
+  }
+}
+function handQ(h, z) {
+  const d = Math.hypot((h.x - z[0]) / RX, (h.y - z[1]) / RY);
+  return clamp((1.7 - d) / 1.1, 0, 1);
+}
+function handsQ(pose) {
+  const L = BodyMovin.hands.left, R = BodyMovin.hands.right, [a, b] = zOf(pose);
+  if (L.seen && R.seen) return Math.max((handQ(L, a) + handQ(R, b)) / 2, (handQ(L, b) + handQ(R, a)) / 2);
+  const h = R.seen ? R : L.seen ? L : null;
+  return h ? Math.max(handQ(h, a), handQ(h, b)) : 0;
+}
+const bodyLive = () => BodyMovin.live && !BodyMovin.mouse;
+function poseQ(card) {
+  const p = card.pose || SAFE_POSE;
+  if (p.jump) {
+    if (!bodyLive()) return { q: BodyMovin.hands.right.speed > 1.2 ? Math.max(0.65, handsQ(p)) : handsQ(p) * 0.6, hint: "JUMP!" };
+    const hitT = card.beat * BEAT;
+    let jq = 0;
+    for (const jt of jumpTimes) {
+      const d = Math.abs(jt - hitT);
+      jq = Math.max(jq, d < 0.3 ? 1 : d < 0.5 ? 0.72 : 0);
+    }
+    return { q: jq ? clamp(jq * 0.95 + 0.05, 0, 1) : 0, hint: jq ? "JUMP ON THE BEAT!" : "JUMP!" };
+  }
+  if (BR.ok) {
+    const r = bodyJudge(p);
+    card.parts = r.parts;
+    return r;
+  }
+  const hq = handsQ(p);
+  if (p.squat && bodyLive()) {
+    const cq = clamp((BodyMovin.body.crouch - 0.2) / 0.35, 0, 1);
+    let q = cq * 0.6 + hq * 0.4;
+    if (cq < 0.3) q = Math.min(q, 0.45);
+    return { q, hint: "SQUAT LOWER!" };
+  }
+  return { q: hq, hint: "" };
+}
+const HINT_OK = { perfect: "PERFECT!", great: "GREAT!", ok: "OK", miss: "MISS" };
+function judge(card, songBeat) {
+  var _a, _b, _c, _d, _e, _f, _g, _h;
+  card.done = true;
+  const q = card.best;
+  const res = q >= 0.85 ? "perfect" : q >= 0.6 ? "great" : q >= 0.3 ? "ok" : "miss";
+  card.res = res;
+  card.fx = 1;
+  counts[res]++;
+  recent.push(res);
+  judged++;
+  const zs = zOf(card.pose).map((z) => [z[0] * W, z[1] * H]);
+  if (res === "miss") {
+    combo = 0;
+    SFX.miss();
+    shake = 0.25;
+    (_b = (_a = window.__stageFX) == null ? void 0 : _a.miss) == null ? void 0 : _b.call(_a);
+  } else {
+    combo++;
+    maxCombo = Math.max(maxCombo, combo);
+    const base = { perfect: 300, great: 200, ok: 100 }[res];
+    score += Math.round(base * (1 + Math.min(combo, 20) / 10));
+    if (res === "perfect") {
+      SFX.perfect(combo);
+      (_d = (_c = window.__stageFX) == null ? void 0 : _c.perfect) == null ? void 0 : _d.call(_c);
+      flash = 0.4;
+      flashCol = "255,230,255";
+      shake = 0.4;
+      for (const [x, y] of zs) burst(x, y, 24, card.pose);
+      confettiBurst(0.5 * W, 0.42 * H, 70);
+    } else if (res === "great") {
+      SFX.great();
+      (_f = (_e = window.__stageFX) == null ? void 0 : _e.great) == null ? void 0 : _f.call(_e);
+      flash = 0.2;
+      for (const [x, y] of zs) burst(x, y, 28, card.pose);
+    } else {
+      SFX.ok();
+      for (const [x, y] of zs) burst(x, y, 12, card.pose);
+    }
+    if (combo > 0 && combo % 10 === 0) {
+      SFX.cheer();
+      (_h = (_g = window.__stageFX) == null ? void 0 : _g.cheer) == null ? void 0 : _h.call(_g);
+      confettiBurst(0.5 * W, 0, 160, true);
+      popups.push({ text: "".concat(combo, " COMBO!"), sub: "YOU ARE ON FIRE", t: 0, col: "#ffd86b", y: 0.4 });
+    }
+  }
+  const fix = res !== "perfect" && card.hint ? card.hint : "";
+  const lab = fix ? "".concat(HINT_OK[res], " · ").concat(fix) : HINT_OK[res], col = { perfect: "#ffe36b", great: "#7cf0ff", ok: "#c9b8ff", miss: "#ff6b8a" }[res];
+  log.push({ key: card.key, q: +q.toFixed(3), res, hint: fix, body: !!BR.ok });
+  if (!popups.some((p) => p.sub && p.t === 0)) popups.push({ text: lab, t: 0, col, y: 0.55, big: res === "perfect", hold: fix ? 1.1 : 0.8 });
+}
+function capture(c) {
+  var _a, _b;
+  c.done = true;
+  c.fx = 1;
+  judged++;
+  snaps++;
+  let res, echoPose, zz;
+  if (BR.ok) {
+    const { sp, away } = captureSpec(), sig = JSON.stringify([sp.knee, sp.legOut, sp.squat, sp.wide, (sp.toes || []).join()]);
+    const diff = lastSnap ? (lastSnap.sig !== sig ? 1.5 : 0) + ["l", "r"].reduce((t, s) => t + (sp.arms[s] && lastSnap.arms[s] ? angDiff(sp.arms[s].a, lastSnap.arms[s].a) / 40 : 0), 0) : 3;
+    lastSnap = { sig, arms: sp.arms };
+    res = away < 1 ? "miss" : diff < 0.6 ? "ok" : away >= 2.5 ? "perfect" : "great";
+    echoPose = res === "miss" ? { ...MOVES.reach, name: "REACH UP", echo: true } : { ...sp, name: "YOUR MOVE ".concat(c.n), echo: true };
+  } else {
+    const L = BodyMovin.hands.left, R = BodyMovin.hands.right, cl = (z) => [clamp(z[0], 0.07, 0.93), clamp(z[1], 0.1, 0.78)];
+    let a = L.seen ? [L.x, L.y] : REST[0], b = R.seen ? [R.x, R.y] : REST[1];
+    if (a[0] > b[0]) [a, b] = [b, a];
+    a = cl(a);
+    b = cl(b);
+    const crouch = bodyLive() && BodyMovin.body.crouch > 0.5, jump = bodyLive() && jumpTimes.some((j) => Math.abs(j - c.beat * BEAT) < 0.45);
+    const nd = (p, q) => Math.hypot((p[0] - q[0]) / RX, (p[1] - q[1]) / RY);
+    const away = (nd(a, REST[0]) + nd(b, REST[1])) / 2 + (crouch || jump ? 1.5 : 0);
+    const diff = lastSnap && lastSnap.z ? (nd(a, lastSnap.z[0]) + nd(b, lastSnap.z[1])) / 2 + (crouch !== lastSnap.crouch ? 1 : 0) : 3;
+    lastSnap = { z: [a, b], crouch };
+    res = away < 0.9 ? "miss" : diff < 0.6 ? "ok" : away > 2.2 ? "perfect" : "great";
+    const dirOf = (h, s) => ({ a: Math.round(Math.atan2(0.46 - h[1], (h[0] - 0.5) * (s === "l" ? -1 : 1) - 0.18) * 180 / Math.PI), tol: 30 });
+    echoPose = res === "miss" ? { ...MOVES.reach, name: "REACH UP", echo: true } : { name: "YOUR MOVE ".concat(c.n), z: [a, b], arms: { l: dirOf(a, "l"), r: dirOf(b, "r") }, squat: crouch ? 1 : 0, jump: jump ? 1 : 0, echo: true };
+    zz = [a, b];
+  }
+  c.res = res;
+  counts[res]++;
+  recent.push(res === "miss" ? "miss" : "ok");
+  c.echo.pose = echoPose;
+  c.echo.key = "echo";
+  flash = 0.6;
+  flashCol = "255,255,255";
+  SFX.snap();
+  (_b = (_a = window.__stageFX) == null ? void 0 : _a.snap) == null ? void 0 : _b.call(_a);
+  if (res !== "miss") {
+    combo++;
+    maxCombo = Math.max(maxCombo, combo);
+    score += Math.round({ perfect: 300, great: 200, ok: 100 }[res] * (1 + Math.min(combo, 20) / 10));
+    for (const z of zz || zOf(echoPose)) burst(z[0] * W, z[1] * H, res === "perfect" ? 40 : 24, echoPose);
+    if (res === "perfect") confettiBurst(W / 2, H * 0.42, 50);
+  }
+  log.push({ key: "free", res, body: !!BR.ok });
+  popups.push({ text: { perfect: "WOW!", great: "COOL!", ok: "TRY A NEW ONE!", miss: "STRIKE A BIG POSE!" }[res], t: 0, col: res === "miss" ? "#ff9ab0" : "#8dff9a", y: 0.7, big: res === "perfect" });
+  c.snapPose = echoPose;
+}
+function endRound() {
+  state = "end";
+  clearInterval(schedTimer);
+  SFX.end();
+  const prevBest = BodyMovin.best(GAME), act = { min: BodyMovin.activity.activeSec / 60, kcal: BodyMovin.activity.kcal };
+  BodyMovin.saveSession({ game: GAME, score });
+  if (BodyMovin.highScores) BodyMovin.highScores(GAME, score);
+  const total = judged || 1, acc = Math.round(100 * (counts.perfect + counts.great * 0.75 + counts.ok * 0.4) / total);
+  endInfo = { prevBest, best: Math.max(prevBest, score), newBest: score > prevBest && score > 0, ...act, acc, t0: performance.now() };
+  confettiBurst(W / 2, 0, 220, true);
+}
+function burst(x, y, n, pose) {
+  const col = POSE_COL(pose);
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * 6.283, s = (0.2 + Math.random()) * U * 0.9;
+    particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 1, r: U * (25e-4 + Math.random() * 4e-3), col });
+  }
+}
+const CONF = ["#ff5fa2", "#ffd84a", "#5fe0ff", "#8dff7a", "#b48cff", "#ff9a4a"];
+function confettiBurst(x, y, n, rain) {
+  var _a, _b;
+  try {
+    (_b = (_a = window.__stageFX) == null ? void 0 : _a.confetti) == null ? void 0 : _b.call(_a, n, rain);
+  } catch (e) {
+  }
+  return;
+  for (let i = 0; i < n; i++) {
+    const a = rain ? Math.PI / 2 + (Math.random() - 0.5) * 1.2 : Math.random() * 6.283, s = (rain ? 0.2 + Math.random() * 0.5 : 0.4 + Math.random() * 0.9) * U;
+    confetti.push({ x: rain ? Math.random() * W : x, y: rain ? -Math.random() * H * 0.2 : y, vx: Math.cos(a) * s * (rain ? 0.3 : 1), vy: Math.sin(a) * s - (rain ? 0 : U * 0.3), rot: Math.random() * 6, vr: (Math.random() - 0.5) * 12, w: U * (8e-3 + Math.random() * 0.01), h: U * (0.014 + Math.random() * 0.012), col: CONF[i % CONF.length], life: 1 });
+  }
+}
+let buttons = [], focusId = null;
+function button(id, label, cx, cy, w, h, onPress, { ms = 700, primary = false, small = false, glass = false, fs = 0 } = {}) {
+  buttons.push({ id, label, x: cx - w / 2, y: cy - h / 2, w, h, onPress, ms, primary, small, glass, fs });
+}
+function ui() {
+  const vm = Math.min(innerWidth, innerHeight) / 100, k = DPR;
+  const T = Math.max(10, 1.8 * vm) * k, Hh = Math.max(36, 5.6 * vm) * k, Wb = Math.max(108, 15 * vm) * k, G = Math.max(8, 1.2 * vm) * k, F = Math.max(14, 1.9 * vm) * k;
+  return { T, L: T, Hh, Wb, G, F, sysR: T + 2 * Wb + 2 * G + Hh, vm: vm * k };
+}
+function sysHome() {
+  if (BodyMovin.sysMode && BodyMovin.sysMode() === "play") return;
+  const u = ui();
+  button("syshome", "← HOME", u.L + u.Wb / 2, u.T + u.Hh / 2, u.Wb, u.Hh, goHome, { ms: 1100, glass: true, fs: u.F });
+}
+function glassPill(x, y, w, h, stroke) {
+  ctx.save();
+  ctx.fillStyle = "rgba(10,12,24,0.55)";
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, h / 2);
+  ctx.fill();
+  ctx.lineWidth = DPR;
+  ctx.strokeStyle = stroke || "rgba(255,255,255,0.18)";
+  ctx.stroke();
+  ctx.restore();
+}
+function updateButtons(now) {
+  for (const b of buttons) {
+    b.fill = BodyMovin.dwell(state + b.id, BodyMovin.handOver(b, W, H), now, b.ms);
+    if (b.fill === 1) {
+      b.onPress();
+      return;
+    }
+  }
+}
+function drawButton(b, now) {
+  const r = b.h / 2, focus = focusId === b.id, glow = b.primary ? "#ff7ad9" : "#9d8cff";
+  if (b.glass) {
+    glassPill(b.x, b.y, b.w, b.h, focus ? "#ffffff" : null);
+    if (b.fill > 0) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(b.x, b.y, b.w, b.h, r);
+      ctx.clip();
+      ctx.fillStyle = "rgba(255,122,217,0.35)";
+      ctx.fillRect(b.x, b.y, b.w * b.fill, b.h);
+      ctx.restore();
+    }
+    ctx.save();
+    ctx.fillStyle = "#fff";
+    ctx.font = "800 ".concat(b.fs, "px ").concat(FONT);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    if (ctx.letterSpacing !== void 0) ctx.letterSpacing = "".concat(b.fs * 0.06, "px");
+    ctx.fillText(b.label, b.x + b.w / 2, b.y + b.h / 2 + b.h * 0.02);
+    ctx.restore();
+    return;
+  }
+  ctx.save();
+  ctx.shadowColor = glow;
+  ctx.shadowBlur = (focus ? 34 : 18) * DPR;
+  const g = ctx.createLinearGradient(b.x, b.y, b.x, b.y + b.h);
+  if (b.primary) {
+    g.addColorStop(0, "#ff5fb8");
+    g.addColorStop(1, "#8a3bff");
+  } else {
+    g.addColorStop(0, "rgba(120,90,220,0.45)");
+    g.addColorStop(1, "rgba(60,30,140,0.45)");
+  }
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.roundRect(b.x, b.y, b.w, b.h, r);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  if (b.fill > 0) {
+    ctx.save();
+    ctx.clip();
+    ctx.fillStyle = "rgba(255,255,255,0.32)";
+    ctx.fillRect(b.x, b.y, b.w * b.fill, b.h);
+    ctx.restore();
+  }
+  ctx.lineWidth = (focus ? 4 : 2) * DPR;
+  ctx.strokeStyle = focus ? "#fff" : "rgba(255,255,255,0.55)";
+  ctx.beginPath();
+  ctx.roundRect(b.x, b.y, b.w, b.h, r);
+  ctx.stroke();
+  ctx.fillStyle = "#fff";
+  ctx.font = "800 ".concat(b.h * (b.small ? 0.42 : 0.4), "px ").concat(FONT);
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  if (ctx.letterSpacing !== void 0) ctx.letterSpacing = "".concat(b.h * 0.04, "px");
+  ctx.fillText(b.label, b.x + b.w / 2, b.y + b.h / 2 + b.h * 0.02);
+  ctx.restore();
+}
+cv.addEventListener("pointerdown", (e) => {
+  audioInit();
+  const x = e.clientX * DPR, y = e.clientY * DPR;
+  for (const b of buttons) if (x > b.x && x < b.x + b.w && y > b.y && y < b.y + b.h) {
+    b.onPress();
+    return;
+  }
+});
+addEventListener("keydown", (e) => {
+  audioInit();
+  if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Tab"].includes(e.key) && buttons.length) {
+    e.preventDefault();
+    const i = buttons.findIndex((b) => b.id === focusId), d = e.key === "ArrowLeft" || e.key === "ArrowUp" || e.key === "Tab" && e.shiftKey ? -1 : 1;
+    focusId = buttons[(i + d + buttons.length) % buttons.length].id;
+    return;
+  }
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    const b = buttons.find((b2) => b2.id === focusId) || buttons.find((b2) => b2.primary);
+    if (b) b.onPress();
+  }
+  if (e.key === "Escape" && state === "play") goHome();
+});
+const DUST = Array.from({ length: 70 }, () => ({ x: Math.random(), y: Math.random(), r: Math.random(), s: 0.2 + Math.random() }));
+function drawRoom(now, beatF, pulse) {
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, "#0a0326");
+  g.addColorStop(0.55, "#1c0640");
+  g.addColorStop(1, "#2a0838");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  const t = now / 1e3;
+  [["#ff4fd8", -0.6, 0], ["#4fd8ff", 0.9, 1.1], ["#ffd84f", 2.1, 0.5], ["#8d5bff", 3.3, 1.7]].forEach(([c, ph, x0], i) => {
+    const ox = W * (0.15 + 0.7 * ((i + 0.5) / 4)), ang = Math.PI / 2 + Math.sin(t * 0.5 + ph) * 0.55, len = H * 1.3, wd = 0.13;
+    const gr = ctx.createLinearGradient(ox, 0, ox + Math.cos(ang) * len, Math.sin(ang) * len);
+    gr.addColorStop(0, hexA(c, 0.16 + pulse * 0.1));
+    gr.addColorStop(1, hexA(c, 0));
+    ctx.fillStyle = gr;
+    ctx.beginPath();
+    ctx.moveTo(ox, -10);
+    ctx.lineTo(ox + Math.cos(ang - wd) * len, Math.sin(ang - wd) * len);
+    ctx.lineTo(ox + Math.cos(ang + wd) * len, Math.sin(ang + wd) * len);
+    ctx.closePath();
+    ctx.fill();
+  });
+  const bx = W * 0.5, by = H * 0.035, br = U * 0.035;
+  const bg = ctx.createRadialGradient(bx - br * 0.3, by - br * 0.3, br * 0.1, bx, by, br);
+  bg.addColorStop(0, "rgba(255,255,255,0.9)");
+  bg.addColorStop(0.5, "rgba(180,170,255,0.5)");
+  bg.addColorStop(1, "rgba(80,60,160,0.3)");
+  ctx.fillStyle = bg;
+  ctx.beginPath();
+  ctx.arc(bx, by, br, 0, 6.283);
+  ctx.fill();
+  for (let i = 0; i < 26; i++) {
+    const a = i * 2.39996 + t * 0.4, rr = (0.25 + i * 0.37 % 1) * Math.max(W, H) * 0.6, sx = bx + Math.cos(a) * rr, sy = by + Math.abs(Math.sin(a * 1.3)) * rr * 0.9;
+    ctx.fillStyle = hexA(CONF[i % 6], 0.12 + 0.12 * pulse);
+    ctx.beginPath();
+    ctx.arc(sx, sy, U * 6e-3, 0, 6.283);
+    ctx.fill();
+  }
+  for (const d of DUST) {
+    const y = ((d.y - t * 0.01 * d.s) % 1 + 1) % 1;
+    ctx.fillStyle = "rgba(220,200,255,".concat(0.08 + 0.12 * d.r, ")");
+    ctx.beginPath();
+    ctx.arc(d.x * W, y * H, U * 2e-3 * (1 + d.r), 0, 6.283);
+    ctx.fill();
+  }
+  const fy = H * 0.66, fb = H;
+  ctx.globalAlpha = 0.5 + 0.5 * pulse;
+  for (let i = 0; i < 9; i++) {
+    const k = (i + beatF) / 9, y = fy + (fb - fy) * k * k;
+    ctx.strokeStyle = "rgba(255,90,220,".concat(0.06 + 0.22 * k, ")");
+    ctx.lineWidth = DPR * (1 + k * 2);
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(W, y);
+    ctx.stroke();
+  }
+  for (let i = -8; i <= 8; i++) {
+    ctx.strokeStyle = "rgba(120,200,255,0.12)";
+    ctx.lineWidth = DPR;
+    ctx.beginPath();
+    ctx.moveTo(W / 2 + i * W * 0.03, fy);
+    ctx.lineTo(W / 2 + i * W * 0.16, fb);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+  const hz = ctx.createLinearGradient(0, fy - H * 0.04, 0, fy + H * 0.04);
+  hz.addColorStop(0, "rgba(255,80,220,0)");
+  hz.addColorStop(0.5, "rgba(255,80,220,".concat(0.18 + 0.2 * pulse, ")"));
+  hz.addColorStop(1, "rgba(255,80,220,0)");
+  ctx.fillStyle = hz;
+  ctx.fillRect(0, fy - H * 0.04, W, H * 0.08);
+  ctx.restore();
+}
+const FIG_TOP = -2.6, FIG_H = 4.45, UA = 0.7, FA = 0.75, TH = 0.85, SH = 0.85;
+function picJoints(p, hop = 0) {
+  p = p || SAFE_POSE;
+  const X = (s) => s === "l" ? -1 : 1, sq = p.squat ? 1 : 0, lg = p.lunge, bend = p.toes ? 1 : 0, tip = p.tip ? 0.12 : 0, lean = p.lean ? X(p.lean) : 0;
+  const floor = 1.7 - tip - hop;
+  const hip = [lg ? X(lg) * 0.25 : 0, sq * 0.6 + (lg ? 0.36 : 0) - tip - hop - bend * 0.15];
+  const chest = [hip[0] + lean * 0.38, hip[1] + (bend ? 0.62 : lean ? -0.93 : -1)];
+  const al = -lean * 0.38, sv = [0.42 * Math.cos(al), -0.42 * Math.sin(al)];
+  const J = { neck: chest, hip, sL: [chest[0] - sv[0], chest[1] - sv[1]], sR: [chest[0] + sv[0], chest[1] + sv[1]], up: [lean * 0.36, -1] };
+  J.head = bend ? [chest[0], chest[1] + 0.36] : [chest[0] + lean * 0.16, chest[1] - 0.4];
+  const wideW = p.wide ? 1.35 : 0.5;
+  for (const s of "lr") {
+    const g = X(s), hs = [hip[0] + g * 0.22, hip[1] + 0.05], S = s.toUpperCase();
+    let foot = [g * wideW / 2 + sq * g * 0.12, floor], knee;
+    if (lg) foot = s === lg ? [g * 1.15, floor] : [g * 0.35, floor];
+    knee = [(hs[0] + foot[0]) / 2 + sq * g * 0.32, hs[1] + (foot[1] - hs[1]) * (sq ? 0.4 : 0.5)];
+    if (lg === s) knee = [foot[0] - g * 0.05, hip[1] + 0.5];
+    if (p.knee === s) {
+      knee = [hs[0] + g * 0.42, hs[1] + 0.32];
+      foot = [knee[0] - g * 0.04, knee[1] + SH * 0.95];
+    }
+    if (p.legOut === s) {
+      foot = [hs[0] + g * 1, hs[1] + 1.38];
+      knee = [(hs[0] + foot[0]) / 2, (hs[1] + foot[1]) / 2];
+    }
+    J["h" + S] = hs;
+    J["k" + S] = knee;
+    J["f" + S] = foot;
+    J["t" + S] = tip ? [foot[0] + g * 0.03, foot[1] + 0.16] : [foot[0] + g * 0.17, foot[1] + 0.04];
+  }
+  for (const s of "lr") {
+    const g = X(s), S = s.toUpperCase(), sh = J["s" + S], toe = p.toes && p.toes.find((t) => t[0] === s), a = p.arms && p.arms[s];
+    let hand, el;
+    if (toe) {
+      const f = J["f" + toe[1].toUpperCase()];
+      hand = [f[0], f[1] - 0.14];
+      el = [(sh[0] + hand[0]) / 2 + g * 0.08, (sh[1] + hand[1]) / 2];
+    } else {
+      const ang = (a ? a.a : -80) * Math.PI / 180, L = a && a.ext === false ? 1.1 : UA + FA, d = [g * Math.cos(ang), -Math.sin(ang)];
+      hand = [sh[0] + d[0] * L, sh[1] + d[1] * L];
+      const bendE = a && !a.free && a.ext !== false ? 0.02 : a && a.ext === false ? 0.2 : 0.06;
+      el = [sh[0] + d[0] * L / 2 - d[1] * bendE * g, sh[1] + d[1] * L / 2 + d[0] * bendE * g];
+    }
+    J["e" + S] = el;
+    J["a" + S] = hand;
+  }
+  return J;
+}
+function limb(m, k, pts, w1, w2) {
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [ax, ay] = m(pts[i]), [bx, by] = m(pts[i + 1]), r1 = (w1 + (w2 - w1) * i / (pts.length - 1)) * k / 2, r2 = (w1 + (w2 - w1) * (i + 1) / (pts.length - 1)) * k / 2;
+    const dx = bx - ax, dy = by - ay, L = Math.hypot(dx, dy) || 1e-3, nx = -dy / L, ny = dx / L, an = Math.atan2(dy, dx);
+    ctx.beginPath();
+    ctx.moveTo(ax + nx * r1, ay + ny * r1);
+    ctx.lineTo(bx + nx * r2, by + ny * r2);
+    ctx.arc(bx, by, r2, an + Math.PI / 2, an - Math.PI / 2, true);
+    ctx.lineTo(ax - nx * r1, ay - ny * r1);
+    ctx.arc(ax, ay, r1, an - Math.PI / 2, an + Math.PI / 2, true);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+function drawFigure(pose, cx, top, k, alpha, { hop = 0, face = true, colL = HC.left, colR = HC.right, col = "#e9dcff" } = {}) {
+  pose = pose || SAFE_POSE;
+  const P = picJoints(pose, hop), m = (q) => [cx + q[0] * k, top + (q[1] - FIG_TOP) * k];
+  const tint = (c, a) => hexA(c, a);
+  const armCol = (s) => tint(s === "l" ? colL : colR, 1), legCol = (s) => pose.knee === s || pose.legOut === s || pose.lunge === s ? tint(s === "l" ? colL : colR, 1) : col;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.lineJoin = "round";
+  for (const s of "lr") {
+    const S = s.toUpperCase();
+    ctx.fillStyle = legCol(s);
+    limb(m, k, [P["h" + S], P["k" + S], P["f" + S]], 0.42, 0.24);
+    limb(m, k, [P["f" + S], P["t" + S]], 0.2, 0.15);
+  }
+  {
+    ctx.fillStyle = col;
+    const sL = m(P.sL), sR = m(P.sR), hL = m([P.hL[0] - (P.hL[0] - P.hip[0]) * -0.25, P.hL[1]]), hR = m([P.hR[0] + (P.hR[0] - P.hip[0]) * 0.25, P.hR[1]]);
+    const c = m(P.neck), h = m(P.hip), wx = (h[0] + c[0]) / 2, wy = (h[1] + c[1]) / 2, ww = 0.3 * k, sx = sR[0] - sL[0], sy = sR[1] - sL[1], sl = Math.hypot(sx, sy) || 1;
+    ctx.beginPath();
+    ctx.moveTo(sL[0], sL[1] - 0.06 * k);
+    ctx.lineTo(sR[0], sR[1] - 0.06 * k);
+    ctx.quadraticCurveTo(sR[0] + sy / sl * 0.12 * k, sR[1] + 0.2 * k, wx + ww * sx / sl, wy);
+    ctx.lineTo(hR[0], hR[1]);
+    ctx.lineTo(hL[0], hL[1]);
+    ctx.lineTo(wx - ww * sx / sl, wy);
+    ctx.quadraticCurveTo(sL[0] - sy / sl * 0.12 * k, sL[1] + 0.2 * k, sL[0], sL[1] - 0.06 * k);
+    ctx.closePath();
+    ctx.fill();
+    for (const q of [sL, sR]) {
+      ctx.beginPath();
+      ctx.arc(q[0], q[1] + 0.04 * k, 0.17 * k, 0, 6.283);
+      ctx.fill();
+    }
+    ctx.beginPath();
+    ctx.ellipse(h[0], h[1] + 0.04 * k, 0.3 * k, 0.14 * k, 0, 0, 6.283);
+    ctx.fill();
+  }
+  {
+    const c = m(P.neck), hd = m(P.head), hr = 0.23 * k;
+    ctx.fillStyle = col;
+    limb(m, k, [P.neck, [(P.neck[0] + P.head[0]) / 2, (P.neck[1] + P.head[1]) / 2]], 0.16, 0.15);
+    ctx.beginPath();
+    ctx.ellipse(hd[0], hd[1], hr * 0.86, hr, 0, 0, 6.283);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(20,10,40,0.45)";
+    ctx.lineWidth = 0.03 * k;
+    ctx.stroke();
+    void c;
+    if (face && !pose.toes) {
+      ctx.fillStyle = "#2a0a4a";
+      ctx.beginPath();
+      ctx.arc(hd[0] - hr * 0.32, hd[1] - hr * 0.1, hr * 0.11, 0, 6.283);
+      ctx.arc(hd[0] + hr * 0.32, hd[1] - hr * 0.1, hr * 0.11, 0, 6.283);
+      ctx.fill();
+    }
+  }
+  for (const s of "lr") {
+    const S = s.toUpperCase();
+    ctx.fillStyle = armCol(s);
+    limb(m, k, [P["s" + S], P["e" + S], P["a" + S]], 0.3, 0.19);
+    const [x, y] = m(P["a" + S]);
+    ctx.beginPath();
+    ctx.arc(x, y, 0.14 * k, 0, 6.283);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+let lastNow = 0, hitInfo = null, DT = 1 / 60;
+const LANE_Y = 0.8, HIT_X = 0.11;
+let frameErr = 0;
+function frame(now) {
+  try {
+    frameBody(now);
+  } catch (e) {
+    if (frameErr++ < 3) console.warn("posematch frame error (recovered):", e);
+    try {
+      ctx.restore();
+    } catch (_) {
+    }
+  }
+  requestAnimationFrame(frame);
+}
+function frameBody(now) {
+  var _a;
+  BodyMovin.update(now);
+  const dt = Math.min(0.05, (now - (lastNow || now)) / 1e3);
+  lastNow = now;
+  DT = dt;
+  BR.update(dt || 1 / 60);
+  buttons = [];
+  let songBeat = -99, beatF = now / 1e3 / BEAT % 1, pulse = Math.exp(-beatF * 5) * 0.5;
+  if (state === "play") {
+    songBeat = songNow() / BEAT;
+    beatF = (songBeat % 1 + 1) % 1;
+    pulse = songBeat > 0 ? Math.exp(-beatF * 5) : 0;
+    spawnCards(songBeat);
+    const t = songNow();
+    let first = true;
+    for (const c of cards) {
+      if (c.done) continue;
+      if (!c.pose) c.pose = { ...SAFE_POSE };
+      if (c.pose.free) {
+        if (t - c.beat * BEAT >= 0.08) capture(c);
+        continue;
+      }
+      const d = t - c.beat * BEAT, early = c.pose.big ? 1 : 0.5, late = c.pose.jump ? 0.5 : c.pose.big ? 0.55 : 0.35;
+      if (first && d > -early) {
+        const r = poseQ(c), q = Math.min(r.q, (_a = c.lastQ) != null ? _a : r.q);
+        c.lastQ = r.q;
+        if (q > c.best || !c.hint) {
+          c.best = Math.max(c.best, q);
+          c.hint = r.hint;
+        }
+        c.liveQ = r.q;
+        if (r.hint !== c.liveHint && now - (c.hintAt || 0) > 300) {
+          c.liveHint = r.hint;
+          c.hintAt = now;
+        }
+        c.live = true;
+      }
+      first = false;
+      if (d >= 0 && c.best >= 0.85 || d >= late) judge(c, songBeat);
+    }
+    jumpTimes = jumpTimes.filter((j) => t - j < 2);
+    const armsUpCard = (p) => p && (p.free || p.echo || p.arms && p.arms.l && p.arms.r && p.arms.l.a >= 60 && p.arms.r.a >= 60);
+    const quiet = cards.some((c) => armsUpCard(c.pose) && t > c.beat * BEAT - 1.6 && t < c.beat * BEAT + 1);
+    BodyMovin.pauseHold = quiet ? 1e9 : void 0;
+    if (quiet) BodyMovin._pauseHold = 0;
+    if (songBeat >= END_BEAT) endRound();
+  } else BodyMovin.pauseHold = void 0;
+  shake = Math.max(0, shake - dt * 1.6);
+  flash = Math.max(0, flash - dt * 2.2);
+  ctx.save();
+  if (shake > 0) ctx.translate((Math.random() - 0.5) * shake * U * 0.03, (Math.random() - 0.5) * shake * U * 0.03);
+  ctx.clearRect(0, 0, W, H);
+  {
+    const nx = state === "play" ? cards.find((c) => !c.done && c.pose) : null;
+    window.__dance = { state, songBeat, beatF, pulse, now, next: nx ? {
+      pic: nx.pose,
+      z: zOf(nx.pose),
+      crouch: !!nx.pose.squat,
+      jump: !!nx.pose.jump,
+      free: !!nx.pose.free,
+      echo: !!nx.pose.echo,
+      tt: nx.beat * BEAT - songNow(),
+      match: BR.ok && nx.live && nx.parts ? limbMatch(nx.parts) : null
+    } : null };
+  }
+  if (state === "title") drawTitle(now);
+  else if (state === "play") drawPlay(now, songBeat, pulse);
+  else drawEnd(now);
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.vx *= 0.94;
+    p.vy *= 0.94;
+    p.life -= dt * 1.3;
+    if (p.life <= 0) {
+      particles.splice(i, 1);
+      continue;
+    }
+    if (TVM) {
+      ctx.globalAlpha = p.life;
+      ctx.fillStyle = p.col;
+    } else ctx.fillStyle = hexA(p.col, p.life);
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r * (0.5 + p.life), 0, 6.283);
+    ctx.fill();
+  }
+  ctx.restore();
+  for (let i = confetti.length - 1; i >= 0; i--) {
+    const p = confetti[i];
+    p.vy += U * 0.9 * dt;
+    p.vx *= 0.985;
+    p.vy *= 0.985;
+    p.x += p.vx * dt + Math.sin(p.rot) * U * 2e-3;
+    p.y += p.vy * dt;
+    p.rot += p.vr * dt;
+    p.life -= dt * 0.35;
+    if (p.y > H + 40 || p.life <= 0) {
+      confetti.splice(i, 1);
+      continue;
+    }
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(p.rot);
+    ctx.scale(1, Math.cos(p.rot * 1.7));
+    ctx.globalAlpha = Math.min(1, p.life * 2);
+    ctx.fillStyle = p.col;
+    ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+    ctx.restore();
+  }
+  if (flash > 0) {
+    ctx.fillStyle = "rgba(".concat(flashCol, ",").concat(flash * 0.2, ")");
+    ctx.fillRect(0, 0, W, H);
+  }
+  for (const b of buttons) drawButton(b, now);
+  BodyMovin.drawHands(ctx, W, H, 1.1);
+  ctx.restore();
+  updateButtons(now);
+  window.__game = {
+    state,
+    score,
+    combo,
+    maxCombo,
+    counts,
+    judged,
+    songBeat,
+    best: BodyMovin.best(GAME),
+    endInfo,
+    buttons: buttons.map((b) => ({ id: b.id, x: (b.x + b.w / 2) / W, y: (b.y + b.h / 2) / H, fill: b.fill })),
+    next: hitInfo,
+    snaps,
+    endNow: () => {
+      if (state === "play") endRound();
+    },
+    cards: cards.filter((c) => !c.done).map((c) => {
+      var _a2, _b, _c, _d;
+      return { key: c.key, free: !!((_a2 = c.pose) == null ? void 0 : _a2.free), pending: !!((_b = c.pose) == null ? void 0 : _b.pending), z: zOf(c.pose), crouch: !!((_c = c.pose) == null ? void 0 : _c.squat), jump: !!((_d = c.pose) == null ? void 0 : _d.jump), hitMs: songT0 + c.beat * BEAT * 1e3, best: c.best, liveQ: c.liveQ, hint: c.liveHint };
+    }),
+    struggling: state === "play" ? struggling() : false,
+    warmup: null,
+    log,
+    body: BR.ok ? { S: +BR.S.toFixed(4), armRef: +BR.armRef.toFixed(3), thigh: +BR.thighStand.toFixed(3), legStand: +BR.legStand.toFixed(3), hipH: +BR.hipH.toFixed(3), normal: BR.normal } : null
+  };
+}
+function glowText(text, x, y, size2, col, { weight = 900, align = "center", blur = 0.35, alpha = 1, spacing = 0 } = {}) {
+  if (TVM) size2 = size2 < 40 ? Math.round(size2) : Math.round(size2 / 2) * 2;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.font = "".concat(weight, " ").concat(size2, "px ").concat(FONT);
+  ctx.textAlign = align;
+  ctx.textBaseline = "middle";
+  if (ctx.letterSpacing !== void 0) ctx.letterSpacing = "".concat(spacing * size2, "px");
+  const tw = textW("".concat(weight, " ").concat(size2), spacing, text), room = align === "center" ? W * 0.94 : align === "left" ? W * 0.97 - x : x - W * 0.03;
+  if (tw > room) {
+    size2 *= room / tw;
+    ctx.font = "".concat(weight, " ").concat(size2, "px ").concat(FONT);
+  }
+  if (state === "play" && alpha > 0.05) {
+    const w = Math.min(tw, room), x0 = align === "center" ? x - w / 2 : align === "left" ? x : x - w;
+    hudRects.push({ x: x0 / DPR, y: (y - size2 * 0.6) / DPR, w: w / DPR, h: size2 * 1.2 / DPR });
+  }
+  ctx.shadowColor = "rgba(0,0,0,0.55)";
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetX = size2 * 0.02;
+  ctx.shadowOffsetY = size2 * 0.05;
+  ctx.fillStyle = col;
+  ctx.fillText(text, x, y);
+  ctx.restore();
+}
+function drawZone(x, y, r, col, approach, live, mirror) {
+  if (state === "play") hudRects.push({ x: (x - r * 1.5) / DPR, y: (y - r * 1.5) / DPR, w: r * 3 / DPR, h: r * 3 / DPR });
+  if (TVM) {
+    const lq = Math.round(live * 10) / 10, s = sprite("zone|".concat(col, "|").concat(Math.round(r), "|").concat(mirror, "|").concat(lq), r * 2.6, r * 2.6, () => zoneVec(0, 0, r, col, 0, lq, mirror));
+    ctx.drawImage(s, x - s.width / 2, y - s.height / 2);
+    if (approach > 0.02) {
+      ctx.lineWidth = U * 5e-3;
+      ctx.strokeStyle = hexA("#ffffff", 0.2 + 0.6 * (1 - approach));
+      ctx.beginPath();
+      ctx.arc(x, y, r * (1 + approach * 0.9), 0, 6.283);
+      ctx.stroke();
+    }
+    return;
+  }
+  zoneVec(x, y, r, col, approach, live, mirror);
+}
+function zoneVec(x, y, r, col, approach, live, mirror) {
+  ctx.save();
+  const g = ctx.createRadialGradient(x, y, r * 0.2, x, y, r * 1.25);
+  g.addColorStop(0, hexA(col, 0.1 + live * 0.28));
+  g.addColorStop(0.75, hexA(col, 0.07 + live * 0.18));
+  g.addColorStop(1, hexA(col, 0));
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(x, y, r * 1.25, 0, 6.283);
+  ctx.fill();
+  ctx.lineWidth = U * 0.012;
+  ctx.strokeStyle = "rgba(0,0,0,0.35)";
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, 6.283);
+  ctx.stroke();
+  ctx.lineWidth = U * (6e-3 + live * 4e-3);
+  ctx.strokeStyle = live > 0.5 ? "#ffffff" : hexA(col, 0.95);
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, 6.283);
+  ctx.stroke();
+  if (approach > 0.02) {
+    ctx.lineWidth = U * 5e-3;
+    ctx.strokeStyle = hexA("#ffffff", 0.2 + 0.6 * (1 - approach));
+    ctx.beginPath();
+    ctx.arc(x, y, r * (1 + approach * 0.9), 0, 6.283);
+    ctx.stroke();
+  }
+  ctx.translate(x, y);
+  ctx.scale(mirror ? -1 : 1, 1);
+  const k = r * 0.5;
+  ctx.fillStyle = live > 0.5 ? "#ffffff" : hexA(col, 0.9);
+  ctx.strokeStyle = "rgba(0,0,0,0.35)";
+  ctx.lineWidth = U * 3e-3;
+  ctx.beginPath();
+  ctx.ellipse(0, k * 0.28, k * 0.42, k * 0.4, 0, 0, 6.283);
+  ctx.fill();
+  ctx.stroke();
+  [[-0.3, -0.42, -0.12], [-0.1, -0.55, -0.04], [0.11, -0.53, 0.04], [0.3, -0.4, 0.14]].forEach(([fx, fy, a]) => {
+    ctx.save();
+    ctx.translate(fx * k, fy * k);
+    ctx.rotate(a);
+    ctx.beginPath();
+    ctx.ellipse(0, 0, k * 0.1, k * 0.3, 0, 0, 6.283);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  });
+  ctx.save();
+  ctx.translate(-0.5 * k, 0.12 * k);
+  ctx.rotate(-0.9);
+  ctx.beginPath();
+  ctx.ellipse(0, 0, k * 0.11, k * 0.27, 0, 0, 6.283);
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+  ctx.restore();
+}
+const SPR = /* @__PURE__ */ new Map(), FIGSPR = /* @__PURE__ */ new WeakMap();
+function sprite(key, w, h, draw, map = SPR, obj) {
+  let m = map;
+  if (obj) {
+    m = map.get(obj);
+    if (!m) map.set(obj, m = /* @__PURE__ */ new Map());
+  }
+  let s = m.get(key);
+  if (s) return s;
+  if (!obj && SPR.size > 300) SPR.clear();
+  const cv2 = document.createElement("canvas");
+  cv2.width = Math.ceil(w);
+  cv2.height = Math.ceil(h);
+  const g = cv2.getContext("2d");
+  const keep = ctx;
+  ctx = g;
+  ctx.translate(cv2.width / 2, cv2.height / 2);
+  try {
+    draw();
+  } finally {
+    ctx = keep;
+  }
+  m.set(key, s = cv2);
+  return s;
+}
+const blit = (s) => ctx.drawImage(s, -s.width / 2, -s.height / 2);
+function drawCardTV(c, cw, ch, now, highlight, col, a) {
+  const pad = 6 * DPR, SW = cw + pad * 2, SH2 = ch + pad * 2, fh = ch * 0.78, cap = Math.max((innerWidth >= 960 && innerHeight >= 500 ? 14 : 12) * DPR, ch * 0.13);
+  blit(sprite("plate|".concat(col, "|").concat(highlight, "|").concat(cw, "|").concat(ch), SW, SH2, () => {
+    const g = ctx.createLinearGradient(0, -ch / 2, 0, ch / 2);
+    g.addColorStop(0, "rgba(38,36,46,0.82)");
+    g.addColorStop(1, "rgba(12,12,18,0.88)");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.roundRect(-cw / 2, -ch / 2, cw, ch, ch * 0.14);
+    ctx.fill();
+    ctx.lineWidth = (highlight ? 3.5 : 2) * DPR;
+    ctx.strokeStyle = hexA(col, highlight ? 1 : 0.7);
+    ctx.stroke();
+  }));
+  const words = (txt, res) => blit(sprite("txt|".concat(col, "|").concat(cw, "|").concat(ch, "|").concat(txt, "|").concat(res), SW, SH2, () => {
+    ctx.font = "800 ".concat(cap, "px ").concat(FONT);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = col;
+    ctx.fillText(txt, 0, ch * 0.4, cw * 0.96);
+    if (res) {
+      ctx.font = "900 ".concat(ch * 0.22, "px ").concat(FONT);
+      ctx.fillStyle = { perfect: "#ffe36b", great: "#7cf0ff", ok: "#c9b8ff", miss: "#ff6b8a" }[res];
+      ctx.fillText(res === "miss" ? "✕" : "★", 0, -ch * 0.05);
+    }
+  }));
+  const fig = (pose, o) => blit(sprite("".concat(cw, "|").concat(ch, "|").concat(o.col), SW, SH2, () => drawFigure(pose, 0, -ch / 2 + ch * 0.04, fh / FIG_H, 1, o), FIGSPR, pose));
+  if (c.pose.free || c.pose.pending) {
+    const glyph = c.pose.free ? "★" : "?", st = sprite("star|".concat(col, "|").concat(glyph, "|").concat(ch), ch * 1.3, ch * 1.3, () => {
+      ctx.font = "900 ".concat(ch * 0.5, "px ").concat(FONT);
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.shadowColor = col;
+      ctx.shadowBlur = ch * 0.2;
+      ctx.fillStyle = col;
+      ctx.fillText(glyph, 0, 0);
+    });
+    ctx.drawImage(st, -st.width / 2, -ch * 0.06 + Math.sin(now / 1e3 * 6 + c.beat) * ch * 0.03 - st.height / 2);
+    words(c.pose.free ? "YOUR MOVE" : "COPY IT", "");
+    if (c.done && c.snapPose) {
+      ctx.globalAlpha = 1 - c.fx * 0.2;
+      fig(c.snapPose, { col: "#8dff9a" });
+    }
+    return;
+  }
+  ctx.globalAlpha = 1;
+  fig(c.pose, { face: false, hop: c.pose.jump ? 0.15 : 0, col: "#f2efe9" });
+  ctx.globalAlpha = a;
+  words(c.pose.name, c.done && c.res || "");
+}
+function drawCard(c, x, y, cw, ch, now, highlight) {
+  if (!c.pose) c.pose = { ...SAFE_POSE };
+  const col = POSE_COL(c.pose);
+  ctx.save();
+  let a = 1, sc = 1;
+  if (c.done) {
+    c.fx = Math.max(0, c.fx - 0.03);
+    a = c.fx;
+    sc = 1 + (1 - c.fx) * (c.res === "miss" ? 0 : 0.3);
+    y -= (1 - c.fx) * ch * (c.res === "miss" ? 0 : 0.6);
+  }
+  ctx.globalAlpha = a;
+  ctx.translate(x, y);
+  ctx.scale(sc, sc);
+  if (TVM) {
+    drawCardTV(c, cw, ch, now, highlight, col, a);
+    ctx.restore();
+    return;
+  }
+  const g = ctx.createLinearGradient(0, -ch / 2, 0, ch / 2);
+  g.addColorStop(0, "rgba(38,36,46,0.82)");
+  g.addColorStop(1, "rgba(12,12,18,0.88)");
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.roundRect(-cw / 2, -ch / 2, cw, ch, ch * 0.14);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.lineWidth = (highlight ? 3.5 : 2) * DPR;
+  ctx.strokeStyle = hexA(col, highlight ? 1 : 0.7);
+  ctx.stroke();
+  const fh = ch * 0.78;
+  if (c.pose.free || c.pose.pending) {
+    const tt = now / 1e3;
+    ctx.font = "900 ".concat(ch * 0.5, "px ").concat(FONT);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.shadowColor = col;
+    ctx.shadowBlur = ch * 0.2;
+    ctx.fillStyle = col;
+    ctx.fillText(c.pose.free ? "★" : "?", 0, -ch * 0.06 + Math.sin(tt * 6 + c.beat) * ch * 0.03);
+    ctx.shadowBlur = 0;
+    ctx.font = "800 ".concat(Math.max((innerWidth >= 960 && innerHeight >= 500 ? 14 : 12) * DPR, ch * 0.13), "px ").concat(FONT);
+    ctx.fillText(c.pose.free ? "YOUR MOVE" : "COPY IT", 0, ch * 0.4, cw * 0.96);
+    if (c.done && c.snapPose) drawFigure(c.snapPose, 0, -ch / 2 + ch * 0.04, fh / FIG_H, 1 - c.fx * 0.2, { col: "#8dff9a" });
+    ctx.restore();
+    return;
+  }
+  drawFigure(c.pose, 0, -ch / 2 + ch * 0.04, fh / FIG_H, 1, { face: false, hop: c.pose.jump ? 0.15 : 0, col: "#f2efe9" });
+  ctx.font = "800 ".concat(Math.max((innerWidth >= 960 && innerHeight >= 500 ? 14 : 12) * DPR, ch * 0.13), "px ").concat(FONT);
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = col;
+  ctx.fillText(c.pose.name, 0, ch * 0.4, cw * 0.96);
+  if (c.done && c.res) {
+    ctx.globalAlpha = a;
+    ctx.font = "900 ".concat(ch * 0.22, "px ").concat(FONT);
+    ctx.fillStyle = { perfect: "#ffe36b", great: "#7cf0ff", ok: "#c9b8ff", miss: "#ff6b8a" }[c.res];
+    ctx.fillText(c.res === "miss" ? "✕" : "★", 0, -ch * 0.05);
+  }
+  ctx.restore();
+}
+function drawFreestyle(c, tt, pulse, songBeat) {
+  const n = Math.max(1, Math.ceil(tt / BEAT)), vs = U * 0.07, my = hudRow(songBeat).below + vs * 0.6;
+  glowText("YOUR MOVE! ".concat(n), W / 2, my, vs * (1 + 0.06 * pulse), "#8dff9a", { spacing: 0.03 });
+}
+function hudRow(songBeat) {
+  const u = ui(), remain = Math.max(0, (END_BEAT - songBeat) * BEAT), m = Math.floor(remain / 60), sec = Math.floor(remain % 60);
+  const tTxt = "".concat(m, ":").concat(String(sec).padStart(2, "0")), sTxt = score.toLocaleString(), fs = u.Hh * 0.56;
+  const ws = textW("900 ".concat(fs, "px ").concat(FONT), ctx.letterSpacing, sTxt, 1), wt = textW("700 ".concat(fs * 0.8, "px ").concat(FONT), ctx.letterSpacing, tTxt, 1);
+  const gap = fs * 0.9, pw = Math.max(u.Wb, wt + gap + ws + u.Hh * 0.9), px = W / 2 - pw / 2, row2 = px < u.sysR + u.G, py = row2 ? u.T + u.Hh + u.G : u.T;
+  const N = BodyMovin.notice, nb = N ? (N.y + N.h) * DPR + u.G : 0;
+  return { u, tTxt, sTxt, fs, ws, wt, gap, pw, px, py, row2, below: Math.max(py + u.Hh + u.G, nb) };
+}
+let hudRects = [];
+function liveTips() {
+}
+function drawHUD(now, songBeat) {
+  sysHome();
+  const R = hudRow(songBeat), u = R.u;
+  const nx = cards.find((c) => !c.done && c.pose), treeUp = !BR.ok && nx && !nx.pose.free && zOf(nx.pose).some((z) => z[1] < 0.25 && Math.abs(z[0] - 0.5) < 0.2) && nx.beat * BEAT - songNow() < BEAT * 4;
+  if (!treeUp) {
+    glassPill(R.px, R.py, R.pw, u.Hh);
+    hudRects.push({ x: R.px / DPR, y: R.py / DPR, w: R.pw / DPR, h: u.Hh / DPR });
+    const x0 = W / 2 - (R.wt + R.gap + R.ws) / 2, cy = R.py + u.Hh / 2 + u.Hh * 0.02;
+    ctx.save();
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "left";
+    ctx.font = "700 ".concat(R.fs * 0.8, "px ").concat(FONT);
+    ctx.fillStyle = "#c9b8ff";
+    ctx.fillText(R.tTxt, x0, cy);
+    ctx.font = "900 ".concat(R.fs, "px ").concat(FONT);
+    ctx.fillStyle = "#fff";
+    ctx.fillText(R.sTxt, x0 + R.wt + R.gap, cy);
+    ctx.restore();
+  }
+  if (combo >= 2) {
+    const cc = combo >= 10 ? "#ffd84a" : "#ff8be0", txt = "".concat(combo, " COMBO");
+    ctx.save();
+    ctx.font = "900 ".concat(u.F, "px ").concat(FONT);
+    const cw = textW(ctx.font, ctx.letterSpacing, txt) + u.Hh * 0.9, cx = Math.min(W - u.L, BodyMovin.freeRight ? BodyMovin.freeRight() * DPR : W) - cw;
+    glassPill(cx, u.T, cw, u.Hh, hexA(cc, 0.7));
+    hudRects.push({ x: cx / DPR, y: u.T / DPR, w: cw / DPR, h: u.Hh / DPR });
+    ctx.fillStyle = cc;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(txt, cx + cw / 2, u.T + u.Hh / 2 + u.Hh * 0.02);
+    ctx.restore();
+  }
+}
+function laneGeom() {
+  const ch = Math.min(H * 0.15, W * 0.2), cw = ch * 1.25, m = U * 0.03;
+  return { ch, cw, hx: Math.max(W * HIT_X, cw * 0.58 + m), ly: H - ch * 0.58 - m * 1.2 };
+}
+function drawPlay(now, songBeat, pulse) {
+  var _a;
+  const t = songNow();
+  hudRects = [];
+  {
+    const g = laneGeom();
+    hudRects.push({ x: 0, y: (g.ly - g.ch * 0.85) / DPR, w: W / DPR, h: (H - g.ly + g.ch * 0.85) / DPR });
+  }
+  if (songBeat < INTRO) {
+    const n = Math.floor(songBeat), k = songBeat - n;
+    let txt = n < 4 ? "GET READY!" : ["3", "2", "1", "POSE!"][n - 4];
+    if (n >= 4 && !((_a = drawPlay.ticked) == null ? void 0 : _a[n])) {
+      (drawPlay.ticked || (drawPlay.ticked = {}))[n] = 1;
+      SFX.tick(n === 7);
+    }
+    if (n < 4) txt = "Copy the card in the gold frame";
+    const sz = U * (n < 4 ? 0.06 : 0.12), my = hudRow(songBeat).below + sz * 0.6;
+    glowText(txt, W / 2, my, sz * (1 + 0.15 * Math.exp(-k * 6)), n < 4 ? "#ff8be0" : "#ffd84a", { alpha: n < 4 ? 1 : 1 - k * 0.6 });
+  } else drawPlay.ticked = null;
+  const lastPop = popups.length ? popups[popups.length - 1] : null, popOn = !!lastPop && lastPop.t < (lastPop.hold || 0.8);
+  const nxt = cards.find((c) => !c.done && c.pose);
+  hitInfo = null;
+  if (nxt) {
+    const tt = nxt.beat * BEAT - t, appear = clamp(1 - tt / (BEAT * 4), 0, 1);
+    hitInfo = { key: nxt.key, z: zOf(nxt.pose), inMs: tt * 1e3 };
+    if (nxt.pose.free) {
+      if (!popOn) drawFreestyle(nxt, tt, pulse, songBeat);
+    } else if (appear > 0) {
+      const map = (u, v) => [u * W, v * H];
+      const P0 = nxt.pose, fixing = BR.ok && nxt.live && nxt.liveHint && nxt.liveQ < 0.85;
+      const verb = fixing ? nxt.liveHint : P0.echo ? P0.name.startsWith("YOUR") ? "COPY YOURSELF!".concat(P0.jump ? " JUMP!" : P0.squat ? " SQUAT!" : "") : P0.say || P0.name : P0.say || P0.name;
+      const zonesOn = !BR.ok;
+      const topMid = zonesOn && zOf(nxt.pose).some((z) => z[1] < 0.25 && Math.abs(z[0] - 0.5) < 0.2);
+      const vs = U * 0.065, my = hudRow(songBeat).below + vs * 0.6;
+      if (popOn) {
+      } else if (!topMid || fixing) glowText(
+        verb,
+        W / 2,
+        topMid ? H * 0.38 : my,
+        // 10/23: high targets own the top centre, so the pose name stays on its card (it sat on the dancer)
+        vs * (1 + 0.05 * pulse),
+        fixing ? "#ffb547" : POSE_COL(nxt.pose),
+        { alpha: fixing ? 1 : 0.4 + 0.6 * appear }
+      );
+      const L = BodyMovin.hands.left, R = BodyMovin.hands.right;
+      if (zonesOn) zOf(nxt.pose).forEach((z, i) => {
+        const h = i === 0 ? L : R, other = i === 0 ? R : L;
+        const live = Math.max(h.seen ? handQ(h, z) : 0, other.seen ? handQ(other, z) * 0.9 : 0);
+        drawZone(z[0] * W, z[1] * H, Math.min(RX * W, RY * H) * 0.62, i === 0 ? HC.left : HC.right, clamp(tt / (BEAT * 4), 0, 1), live, i === 1);
+      });
+    }
+  }
+  const { ly, ch, cw, hx } = laneGeom(), ppb = Math.max((W * 0.98 - hx) / LEAD, cw * 0.62);
+  ctx.save();
+  for (let b = Math.ceil(songBeat); b < songBeat + LEAD + 1; b++) {
+    const x = hx + (b - songBeat) * ppb;
+    ctx.fillStyle = b % 4 === 0 ? "rgba(255,140,230,0.45)" : "rgba(255,255,255,0.15)";
+    ctx.beginPath();
+    ctx.arc(x, ly + ch * 0.6, U * (b % 4 === 0 ? 6e-3 : 4e-3), 0, 6.283);
+    ctx.fill();
+  }
+  ctx.restore();
+  if (TVM) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.roundRect(hx - cw * 0.58, ly - ch * 0.58, cw * 1.16, ch * 1.16, ch * 0.18);
+    ctx.strokeStyle = "rgba(255,216,74,".concat(0.12 + 0.1 * pulse, ")");
+    ctx.lineWidth = (16 + 22 * pulse) * DPR;
+    ctx.stroke();
+    ctx.lineWidth = (8 + 10 * pulse) * DPR;
+    ctx.stroke();
+    ctx.lineWidth = (3 + 3 * pulse) * DPR;
+    ctx.strokeStyle = "rgba(255,216,74,".concat(0.7 + 0.3 * pulse, ")");
+    ctx.stroke();
+    ctx.restore();
+  } else {
+    ctx.save();
+    ctx.shadowColor = "#ffd84a";
+    ctx.shadowBlur = (16 + 30 * pulse) * DPR;
+    ctx.lineWidth = (3 + 3 * pulse) * DPR;
+    ctx.strokeStyle = "rgba(255,216,74,".concat(0.7 + 0.3 * pulse, ")");
+    ctx.beginPath();
+    ctx.roundRect(hx - cw * 0.58, ly - ch * 0.58, cw * 1.16, ch * 1.16, ch * 0.18);
+    ctx.stroke();
+    ctx.restore();
+  }
+  const frameBusy = cards.some((c) => !c.done && (c.beat - songBeat) * ppb < cw * 1.1);
+  const firstDue = cards.filter((c) => !c.done).sort((p, q) => p.beat - q.beat)[0];
+  for (let i = cards.length - 1; i >= 0; i--) {
+    const c = cards[i];
+    if (c.done && c.fx <= 0) {
+      cards.splice(i, 1);
+      continue;
+    }
+    if (c.done && frameBusy) {
+      c.fx = 0;
+      continue;
+    }
+    if (!c.done && c !== firstDue && (c.beat - songBeat) * ppb < cw * 1.1) continue;
+    const x = c.done ? hx : Math.max(hx, hx + (c.beat - songBeat) * ppb);
+    if (x > W + cw) continue;
+    drawCard(c, x, ly, cw, ch, now, c === nxt && c.beat - songBeat < 1.5);
+  }
+  for (let i = popups.length - 1; i >= 0; i--) {
+    const p = popups[i];
+    p.t += DT;
+    if (p.t > (p.hold || 0.8) || i < popups.length - 1) popups.splice(i, 1);
+  }
+  if (popOn && popups.length) {
+    const p = popups[popups.length - 1], hd = p.hold || 0.8, pop = 1 + 0.3 * Math.exp(-p.t * 10), a = p.t < hd - 0.25 ? 1 : Math.max(0, 1 - (p.t - hd + 0.25) / 0.25), sz = U * 0.065;
+    const topMid = !BR.ok && nxt && !nxt.pose.free && zOf(nxt.pose).some((z) => z[1] < 0.25 && Math.abs(z[0] - 0.5) < 0.2), my = hudRow(songBeat).below + sz * 0.6;
+    glowText(p.text, W / 2, topMid ? H * 0.38 : my, sz * pop, p.col, { alpha: a });
+  }
+  drawHUD(now, songBeat);
+  liveTips();
+}
+function drawTitle(now) {
+  const t = (now - titleT0) / 1e3;
+  void t;
+  const bh = Math.min(U * 0.12, H * 0.09);
+  button("start", "START", W / 2, H * 0.8, Math.max(bh * 3.4, U * 0.36), bh, startRound, { primary: true });
+  sysHome();
+  if (!focusId || !["start", "syshome"].includes(focusId)) focusId = "start";
+  if (titleAuto && now - titleT0 > 2e3) {
+    titleAuto = false;
+    startRound();
+  }
+}
+function drawEnd(now) {
+  const e = endInfo, t = (now - e.t0) / 1e3, pop = 1 + 0.3 * Math.exp(-t * 5);
+  const hs = BodyMovin.highScores && BodyMovin.highScores.state;
+  if (hs && hs.phase || t < 0.1) {
+    focusId = null;
+    return;
+  }
+  const u = ui(), top = u.T + u.Hh + u.G, bh = 0.16 * U, by = H * 0.66, room = by - bh / 2 - top;
+  const scx = W > H * 1.05 ? Math.max(W * 0.035, 16) + U * 0.2 : W / 2;
+  if (W < H) {
+    const ph = Math.max(u.Hh, H * 0.06), fs = ph * 0.5, txt = "SCORE  " + score.toLocaleString();
+    ctx.font = "900 ".concat(fs, "px ").concat(FONT);
+    const pw = ctx.measureText(txt).width + ph * 1.2, py = Math.max(u.T, H * 0.012);
+    ctx.save();
+    ctx.fillStyle = "rgba(10,12,24,0.7)";
+    ctx.beginPath();
+    ctx.roundRect(W / 2 - pw / 2, py, pw, ph, ph / 2);
+    ctx.fill();
+    ctx.lineWidth = DPR;
+    ctx.strokeStyle = "rgba(255,255,255,0.18)";
+    ctx.stroke();
+    ctx.restore();
+    glowText(txt, W / 2, py + ph / 2, fs * pop, "#ffffff", { blur: 0.1 });
+    const bh2 = Math.max(56 * DPR, H * 0.07), y2 = H - bh2 - Math.max(H * 0.03, 12 * DPR), hw = W * 0.34, aw = W * 0.48;
+    button("home", "HOME", W * 0.04 + hw / 2, y2 + bh2 / 2, hw, bh2, goHome, { ms: BodyMovin.LEAVE_MS, small: true });
+    button("again", "PLAY AGAIN", W * 0.96 - aw / 2, y2 + bh2 / 2, aw, bh2, startRound, { primary: true });
+    if (!focusId || !["again", "home", "syshome"].includes(focusId)) focusId = "again";
+    return;
+  }
+  {
+    const sz = Math.min(U * 0.17, room * 0.5);
+    ctx.font = "900 ".concat(sz, "px ").concat(FONT);
+    const cw = Math.max(ctx.measureText(score.toLocaleString()).width, U * 0.22) + U * 0.1;
+    const y0 = top + room * 0.2 - Math.max(u.F * 1.1, U * 0.04) * 0.9, y1 = top + room * 0.58 + sz * 0.62;
+    ctx.save();
+    ctx.fillStyle = "rgba(10,12,24,0.6)";
+    ctx.beginPath();
+    ctx.roundRect(scx - cw / 2, y0, cw, y1 - y0, U * 0.03);
+    ctx.fill();
+    ctx.lineWidth = DPR;
+    ctx.strokeStyle = "rgba(255,255,255,0.18)";
+    ctx.stroke();
+    ctx.restore();
+  }
+  glowText("SCORE", scx, top + room * 0.2, Math.max(u.F * 1.1, U * 0.04), "#e6dcff", { weight: 800, spacing: 0.25, blur: 0.1 });
+  glowText(score.toLocaleString(), scx, top + room * 0.58, Math.min(U * 0.17, room * 0.5) * pop, "#ffffff", { blur: 0.3 });
+  const L = BodyMovin.layout.end(W, H, { cy: by, side: true }), A = L.again, Hm = L.home;
+  button("again", "PLAY AGAIN", A.x + A.w / 2, A.y + A.h / 2, A.w, A.h, startRound, { primary: true });
+  button("home", "HOME", Hm.x + Hm.w / 2, Hm.y + Hm.h / 2, Hm.w, Hm.h, goHome, { ms: BodyMovin.LEAVE_MS, small: true });
+  if (!focusId || !["again", "home", "syshome"].includes(focusId)) focusId = "again";
+}
+BodyMovin.start();
+requestAnimationFrame(frame);
+</script>
+<script type="module" src="_lg/posematch-0.js"></script>
+</body>
+</html>

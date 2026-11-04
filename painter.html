@@ -1,0 +1,1584 @@
+<!doctype html>
+<html>
+<head>
+<script src="_lg/polyfills.js"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Sky Painter · Body Movin'</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #02030c; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
+  canvas { display: block; position: fixed; top:0;right:0;bottom:0;left:0; width: 100vw; height: 100vh; }
+  #c { z-index: 2; }
+  /* phone (portrait): when the live camera view is showing on the right edge, the how-to card sits left of it */
+  @media (max-width: 600px) { body:has(#bp-cam) .bph-wrap:not(.bph-mounted) { right: calc(max(90px,15vmin) + 1.4vmin + max(8px,1.2vmin)) !important; left: max(10px,1.8vmin) !important; }
+                              body:has(#bp-cam) .bph-wrap:not(.bph-mounted) .bph-card { width: 100% !important; max-width: none !important; }
+                              body:has(#bp-cam) .bph-wrap:not(.bph-mounted) .bph-txt { font-size: 5vw !important; } body:has(#bp-cam) .bph-wrap:not(.bph-mounted) .bph-title { font-size: 9vw !important; } }
+</style>
+<style id="ui-phone-scores">@media (max-width:600px){html:has(.bphs-wrap) #bp-cam{visibility:hidden}}</style><!-- phone: the high-score card is nearly full width, so the live camera steps away while it is up -->
+</head>
+<body>
+
+<canvas id="gl"></canvas>
+<canvas id="c"></canvas>
+<script src="body.js"></script>
+<script>BodyMovin.realSelf = { view: "behind", outfit: "casual", ghost: "ready" };
+</script>
+<script>BodyMovin.figure = { torso: 0.42, chestY: 0.4, drawReach: true, alpha: 0.22, limb: 1.35, armGain: 1.35, frameReach: false };
+</script>
+<script>BodyMovin.menuBtnStyle = "top:max(10px,1.8vmin);left:calc(max(10px,1.8vmin) + max(108px,15vmin) + max(8px,1.2vmin));width:max(108px,15vmin);height:max(36px,5.6vmin);min-height:0;padding:0;border-radius:999px;border:1px solid rgba(255,255,255,.18);background:rgba(10,12,24,.55);color:#fff;font:800 max(14px,1.9vmin) -apple-system,system-ui,sans-serif;letter-spacing:.06em;opacity:1";
+BodyMovin.musicBtnStyle = "top:max(10px,1.8vmin);left:calc(max(10px,1.8vmin) + 2 * max(108px,15vmin) + 2 * max(8px,1.2vmin));width:max(36px,5.6vmin);height:max(36px,5.6vmin);min-width:0;min-height:0;border:1px solid rgba(255,255,255,.18);background:rgba(10,12,24,.55);color:#fff;opacity:1";
+window.SYS = () => {
+  const vm = Math.min(innerWidth, innerHeight) / 100, L = Math.max(10, 1.8 * vm), Hh = Math.max(36, 5.6 * vm), Wb = Math.max(108, 15 * vm), G = Math.max(8, 1.2 * vm);
+  return { L, T: L, Hh, Wb, G, vm, right: L + 2 * Wb + 2 * G + Hh, bottom: L + Hh };
+};
+</script>
+<script src="howto.js"></script>
+<script src="scores.js"></script>
+<script>BodyMovin.howTo({
+  title: "SKY PAINTER",
+  corner: false,
+  top: SYS().bottom / innerHeight + 0.02,
+  bottom: innerWidth > innerHeight ? 0.6 : 0.56,
+  // room under it for the big START (BODY-UI-PLAN fix 8)
+  moves: [{ anim: "push", text: "Push your hand toward the screen to paint" }, { anim: "punch", text: "Pull it back to lift the brush" }, { anim: "swipe", text: "Write your name!" }]
+});
+</script>
+<script>BodyMovin.selfView = { x: 0.5, y: 0.97, h: 0.27 };
+</script>
+<script>const GAME = "painter";
+const Q = new URLSearchParams(location.search), TV = Q.has("tv"), MUTE = Q.has("mute");
+const ROUND = Math.max(15, +Q.get("round") || 75);
+const cv = document.getElementById("c"), hudCtx = cv.getContext("2d");
+let ctx = hudCtx;
+const glow = document.createElement("canvas"), gctx = glow.getContext("2d");
+window.__glow = glow;
+const paint = document.createElement("canvas"), pctx = paint.getContext("2d");
+let W, H, U, DPR;
+function size() {
+  DPR = Math.min(2, devicePixelRatio || 1);
+  const nw = Math.round(innerWidth * DPR), nh = Math.round(innerHeight * DPR);
+  let keep = null;
+  if (paintBase.width) {
+    keep = document.createElement("canvas");
+    keep.width = paintBase.width;
+    keep.height = paintBase.height;
+    keep.getContext("2d").drawImage(paintBase, 0, 0);
+  }
+  W = cv.width = paint.width = glow.width = paintBase.width = nw;
+  H = cv.height = paint.height = glow.height = paintBase.height = nh;
+  U = Math.min(W, H);
+  if (keep) bctx.drawImage(keep, 0, 0, W, H);
+  redrawPaint();
+  buildSky();
+  if (shape) layoutShape();
+}
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v)), lerp = (a, b, t) => a + (b - a) * t;
+const FONT = '-apple-system, "SF Pro Display", "Segoe UI", system-ui, sans-serif';
+const hsl = (h, s, l, a = 1) => "hsla(".concat((h % 360 + 360) % 360, ",").concat(s, "%,").concat(l, "%,").concat(clamp(a, 0, 1), ")");
+const skyC = document.createElement("canvas"), sctx = skyC.getContext("2d");
+let STARS = [];
+function buildSky() {
+  skyC.width = W;
+  skyC.height = H;
+  const g = sctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, "#02030f");
+  g.addColorStop(0.5, "#071034");
+  g.addColorStop(0.82, "#1a1446");
+  g.addColorStop(1, "#2b1640");
+  sctx.fillStyle = g;
+  sctx.fillRect(0, 0, W, H);
+  sctx.save();
+  sctx.globalCompositeOperation = "lighter";
+  for (let i = 0; i < 260; i++) {
+    const t = Math.random(), x = W * (-0.1 + 1.2 * t), y = H * (0.75 - 0.6 * t) + (Math.random() - 0.5) * H * 0.22, r = U * (0.02 + Math.random() * 0.07);
+    const rg = sctx.createRadialGradient(x, y, 0, x, y, r);
+    rg.addColorStop(0, "rgba(".concat(120 + Math.random() * 60, ",").concat(110 + Math.random() * 50, ",255,0.025)"));
+    rg.addColorStop(1, "rgba(0,0,0,0)");
+    sctx.fillStyle = rg;
+    sctx.beginPath();
+    sctx.arc(x, y, r, 0, 6.283);
+    sctx.fill();
+  }
+  for (let i = 0; i < 900; i++) {
+    sctx.fillStyle = "rgba(255,255,255,".concat(Math.random() * 0.35, ")");
+    sctx.fillRect(Math.random() * W, Math.random() * H * 0.9, DPR * 0.8, DPR * 0.8);
+  }
+  sctx.restore();
+  const mx = W * 0.83, my = H * 0.12, mr = U * 0.055;
+  const halo = sctx.createRadialGradient(mx, my, mr, mx, my, mr * 5);
+  halo.addColorStop(0, "rgba(255,240,210,0.16)");
+  halo.addColorStop(1, "rgba(255,240,210,0)");
+  sctx.fillStyle = halo;
+  sctx.beginPath();
+  sctx.arc(mx, my, mr * 5, 0, 6.283);
+  sctx.fill();
+  const mg = sctx.createRadialGradient(mx - mr * 0.3, my - mr * 0.3, mr * 0.1, mx, my, mr);
+  mg.addColorStop(0, "#fffaf0");
+  mg.addColorStop(1, "#e8dcc0");
+  sctx.fillStyle = mg;
+  sctx.beginPath();
+  sctx.arc(mx, my, mr, 0, 6.283);
+  sctx.fill();
+  sctx.fillStyle = "rgba(190,175,150,0.35)";
+  for (const [dx, dy, r] of [[-0.3, 0.1, 0.2], [0.25, -0.2, 0.14], [0.1, 0.35, 0.1]]) {
+    sctx.beginPath();
+    sctx.arc(mx + dx * mr, my + dy * mr, r * mr, 0, 6.283);
+    sctx.fill();
+  }
+  for (const [base, col, amp, seed] of [[0.86, "#0b0a24", 0.05, 1], [0.92, "#05050f", 0.035, 2]]) {
+    sctx.fillStyle = col;
+    sctx.beginPath();
+    sctx.moveTo(0, H);
+    for (let x = 0; x <= W; x += W / 80) {
+      const u = x / W, y = H * (base - amp * (Math.sin(u * 7 + seed) * 0.6 + Math.sin(u * 17 + seed * 3) * 0.3));
+      sctx.lineTo(x, y);
+    }
+    sctx.lineTo(W, H);
+    sctx.fill();
+    if (seed === 2) for (let i = 0; i < 26; i++) {
+      const x = W * (i * 0.618 * 7 % 1), y = H * (base - amp * (Math.sin(x / W * 7 + seed) * 0.6 + Math.sin(x / W * 17 + seed * 3) * 0.3)), h = H * (0.03 + i * 0.37 % 1 * 0.05);
+      sctx.beginPath();
+      sctx.moveTo(x, y - h);
+      sctx.lineTo(x - h * 0.28, y + 2);
+      sctx.lineTo(x + h * 0.28, y + 2);
+      sctx.fill();
+    }
+  }
+  STARS = Array.from({ length: 90 }, () => ({ x: Math.random() * W, y: Math.random() * H * 0.8, r: U * (15e-4 + Math.random() * 3e-3), ph: Math.random() * 6.28, sp: 0.5 + Math.random() * 2 }));
+}
+let ac = null, master = null, verbIn = null, dry = null, noiseBuf = null, padTimer = null, chimeTimer = null;
+const PENTA = [0, 2, 4, 7, 9], NOTES = [];
+for (let o = 0; o < 3; o++) for (const s of PENTA) NOTES.push(60 + o * 12 + s);
+NOTES.push(96);
+const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
+function audioInit() {
+  if (ac) {
+    if (ac.state === "suspended") ac.resume();
+    return;
+  }
+  try {
+    ac = new (window.AudioContext || window.webkitAudioContext)();
+    master = ac.createGain();
+    master.gain.value = MUTE ? 0 : 0.7;
+    const comp = ac.createDynamicsCompressor();
+    comp.threshold.value = -18;
+    comp.ratio.value = 3;
+    master.connect(comp);
+    comp.connect(ac.destination);
+    const len = ac.sampleRate * 5, ir = ac.createBuffer(2, len, ac.sampleRate);
+    for (let ch = 0; ch < 2; ch++) {
+      const d = ir.getChannelData(ch);
+      let lp = 0;
+      for (let i = 0; i < len; i++) {
+        lp += 0.3 * (Math.random() * 2 - 1 - lp);
+        d[i] = lp * Math.pow(1 - i / len, 2.5) * 1.8;
+      }
+    }
+    const verb = ac.createConvolver();
+    verb.buffer = ir;
+    verbIn = ac.createGain();
+    const wet = ac.createGain();
+    wet.gain.value = 0.7;
+    verbIn.connect(verb);
+    verb.connect(wet);
+    wet.connect(master);
+    dry = ac.createGain();
+    dry.gain.value = 0.6;
+    dry.connect(master);
+    noiseBuf = ac.createBuffer(1, ac.sampleRate * 3, ac.sampleRate);
+    const nd = noiseBuf.getChannelData(0);
+    for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+  } catch (e) {
+    ac = null;
+  }
+}
+function bus(pan = 0, send = 1) {
+  const g = ac.createGain(), p = ac.createStereoPanner(), s = ac.createGain();
+  p.pan.value = clamp(pan, -1, 1);
+  s.gain.value = send;
+  g.connect(p);
+  p.connect(dry);
+  p.connect(s);
+  s.connect(verbIn);
+  return g;
+}
+function partial(dest, f, vol, t, attack, dur, type = "sine", detune = 0) {
+  const o = ac.createOscillator(), g = ac.createGain();
+  o.type = type;
+  o.frequency.value = f;
+  o.detune.value = detune;
+  g.gain.setValueAtTime(1e-4, t);
+  g.gain.exponentialRampToValueAtTime(Math.max(2e-4, vol), t + attack);
+  g.gain.exponentialRampToValueAtTime(1e-4, t + attack + dur);
+  o.connect(g);
+  g.connect(dest);
+  o.start(t);
+  o.stop(t + attack + dur + 0.1);
+}
+const CHORDS = [[48, 55, 62, 64, 67], [45, 52, 57, 60, 64], [41, 53, 57, 60, 67], [43, 55, 59, 62, 69]];
+let chordI = 0;
+function startAmbient() {
+  const pad = () => {
+    if (!ac || ac.state !== "running") return;
+    const t = ac.currentTime, ch = CHORDS[chordI++ % 4];
+    for (const m of ch) {
+      const o = bus((Math.random() - 0.5) * 0.8, 1.1);
+      partial(o, mtof(m), 0.022, t, 3.5, 7.5, "triangle", (Math.random() - 0.5) * 10);
+      partial(o, mtof(m), 0.014, t, 4, 7, "sine", 6);
+    }
+    const n = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain();
+    n.buffer = noiseBuf;
+    n.loop = true;
+    f.type = "bandpass";
+    f.frequency.value = 500 + Math.random() * 400;
+    f.Q.value = 0.6;
+    g.gain.setValueAtTime(1e-4, t);
+    g.gain.exponentialRampToValueAtTime(0.012, t + 4);
+    g.gain.exponentialRampToValueAtTime(1e-4, t + 10);
+    n.connect(f);
+    f.connect(g);
+    g.connect(bus(0, 0.6));
+    n.start(t);
+    n.stop(t + 10.2);
+  };
+  pad();
+  padTimer = setInterval(pad, 8e3);
+  const chime = () => {
+    if (ac && ac.state === "running" && state !== "title") bell(NOTES[8 + Math.floor(Math.random() * 7)], 0.25, (Math.random() - 0.5) * 1.4, "R");
+    chimeTimer = setTimeout(chime, 3500 + Math.random() * 5e3);
+  };
+  chimeTimer = setTimeout(chime, 4e3);
+}
+function bell(m, vel, pan, side) {
+  if (!ac || ac.state !== "running") return;
+  const t = ac.currentTime, o = bus(pan, 1.2), f = mtof(m);
+  if (side === "L") {
+    partial(o, f, 0.07 * vel, t, 4e-3, 1.4, "triangle");
+    partial(o, f * 4, 0.012 * vel, t, 2e-3, 0.25);
+  } else {
+    partial(o, f, 0.06 * vel, t, 6e-3, 2.6);
+    partial(o, f * 2.76, 0.012 * vel, t, 4e-3, 1);
+    partial(o, f, 0.03 * vel, t, 6e-3, 2.4, "sine", 4);
+  }
+}
+function penNote(m, vel, pan, side) {
+  if (!ac || ac.state !== "running") return;
+  const t = ac.currentTime + 5e-3, o = bus(pan, 0.12), f = mtof(m);
+  partial(o, f, (side === "L" ? 0.05 : 0.045) * vel, t, 0.012, 0.55, side === "L" ? "triangle" : "sine");
+  partial(o, f * 2, 8e-3 * vel, t, 0.01, 0.25);
+}
+const SFX = {
+  click() {
+    if (ac) bell(84, 0.8, 0, "R");
+  },
+  pick(m) {
+    if (ac) {
+      bell(m, 0.9, 0, "R");
+      bell(m + 12, 0.5, 0, "L");
+    }
+  },
+  shimmer() {
+    if (!ac || ac.state !== "running") return;
+    for (let i = 0; i < 14; i++) setTimeout(() => bell(NOTES[NOTES.length - 1 - i], 0.45, -1 + i / 7, "R"), i * 55);
+  },
+  star(i) {
+    if (ac) bell(NOTES[Math.min(NOTES.length - 1, 4 + i)], 0.8, (i % 5 - 2) * 0.3, "R");
+  },
+  win() {
+    if (!ac || ac.state !== "running") return;
+    [0, 2, 4, 5, 7, 9].forEach((k, i) => setTimeout(() => bell(NOTES[k + 3], 1, (i - 2.5) * 0.25, i % 2 ? "L" : "R"), i * 110));
+  },
+  tick() {
+    if (ac) bell(79, 0.6, 0, "L");
+  }
+};
+const SWATCHES = [
+  { name: "RAINBOW", hue: null },
+  { name: "RED", hue: 0 },
+  { name: "ORANGE", hue: 24 },
+  { name: "AMBER", hue: 40 },
+  { name: "YELLOW", hue: 56 },
+  { name: "LIME", hue: 85 },
+  { name: "GREEN", hue: 120 },
+  { name: "MINT", hue: 150 },
+  { name: "TEAL", hue: 172 },
+  { name: "CYAN", hue: 188 },
+  { name: "SKY", hue: 204 },
+  { name: "BLUE", hue: 224 },
+  { name: "INDIGO", hue: 246 },
+  { name: "VIOLET", hue: 266 },
+  { name: "PURPLE", hue: 284 },
+  { name: "MAGENTA", hue: 304 },
+  { name: "PINK", hue: 324 },
+  { name: "ROSE", hue: 344 },
+  { name: "GOLD", hue: 44, sat: 55 },
+  { name: "WHITE", hue: 220, sat: 0 }
+];
+const brush = { left: { hue: 320, base: null, sat: 100, erase: false, pts: [], acc: 0, last: 0, lastNote: -1, w: 0 }, right: { hue: 190, base: null, sat: 100, erase: false, pts: [], acc: 0, last: 0, lastNote: -1, w: 0 } };
+const SIZES = [{ k: 0.5, name: "SMALL" }, { k: 1, name: "MEDIUM" }, { k: 1.8, name: "BIG" }];
+let sizeI = 1;
+let strokeLen = 0, noteCount = 0;
+function brushHue(b, t) {
+  return b.base === null ? b.hue : b.base + Math.sin(t * 0.35 + (b === brush.left ? 0 : 2)) * 4;
+}
+const paintBase = document.createElement("canvas"), bctx = paintBase.getContext("2d");
+let strokes = [], undoClear = null;
+const STROKE_KEEP = 40;
+const LAYERS = [[3, 58, 0.035], [1.3, 60, 0.14], [0.7, 66, 0.4], [0.28, 96, 0.9]];
+function drawSeg(c, s, w = W, h = H, u = U) {
+  c.save();
+  c.lineCap = "round";
+  c.lineJoin = "round";
+  if (s[9]) {
+    c.globalCompositeOperation = "destination-out";
+    c.strokeStyle = "#000";
+    c.lineWidth = s[6] * u * 1.6;
+    c.beginPath();
+    c.moveTo(s[0] * w, s[1] * h);
+    c.quadraticCurveTo(s[2] * w, s[3] * h, s[4] * w, s[5] * h);
+    c.stroke();
+    c.restore();
+    return;
+  }
+  c.globalCompositeOperation = "lighter";
+  for (const [mul, l, a] of LAYERS) {
+    c.strokeStyle = hsl(s[7], s[8], s[8] < 20 ? Math.min(96, l + 22) : l, a);
+    c.lineWidth = s[6] * u * mul;
+    c.beginPath();
+    c.moveTo(s[0] * w, s[1] * h);
+    c.quadraticCurveTo(s[2] * w, s[3] * h, s[4] * w, s[5] * h);
+    c.stroke();
+  }
+  c.restore();
+}
+function redrawPaint() {
+  pctx.clearRect(0, 0, W, H);
+  pctx.drawImage(paintBase, 0, 0, W, H);
+  for (const st of strokes) for (const s of st.segs) drawSeg(pctx, s);
+}
+function bakeOld() {
+  while (strokes.length > STROKE_KEEP) {
+    const st = strokes.shift();
+    for (const s of st.segs) drawSeg(bctx, s, paintBase.width, paintBase.height, Math.min(paintBase.width, paintBase.height));
+  }
+}
+function wipeAll() {
+  strokes = [];
+  bctx.clearRect(0, 0, paintBase.width, paintBase.height);
+  pctx.clearRect(0, 0, W, H);
+}
+function undo() {
+  audioInit();
+  if (wipe) return;
+  if (undoClear) {
+    const u = undoClear;
+    undoClear = null;
+    strokes = u.strokes;
+    constellations = u.constellations;
+    bctx.clearRect(0, 0, paintBase.width, paintBase.height);
+    bctx.drawImage(u.base, 0, 0, paintBase.width, paintBase.height);
+    redrawPaint();
+    SFX.pick(NOTES[6]);
+    toast("Picture back", 200);
+    return;
+  }
+  const st = strokes[strokes.length - 1], c = constellations[constellations.length - 1];
+  if (c && (!st || c.born > st.t0)) {
+    constellations.pop();
+    SFX.pick(NOTES[5]);
+    toast("Took back the stars", 200);
+    return;
+  }
+  if (!st) {
+    toast("Nothing to undo", 200);
+    return;
+  }
+  strokes.pop();
+  redrawPaint();
+  SFX.pick(NOTES[5]);
+  toast("Undo", 200);
+}
+const PEN = { tau: 0.08, mem: 40, learn: 8, qLo: 0.25, qHi: 0.97, lo0: 0.66, hi0: 0.88, minSpan: 0.12, k: 0.6, gapMin: 0.09, hys: 0.07 };
+const penS = { left: { e: null, down: false, h: new Float32Array(131), w: 0, lo: PEN.lo0, hi: PEN.hi0, dn: 0.8, up: 0.73, reach: 0 }, right: { e: null, down: false, h: new Float32Array(131), w: 0, lo: PEN.lo0, hi: PEN.hi0, dn: 0.8, up: 0.73, reach: 0 } };
+let mouseDown = false;
+addEventListener("pointerdown", () => {
+  mouseDown = true;
+});
+addEventListener("pointerup", () => {
+  mouseDown = false;
+});
+addEventListener("blur", () => {
+  mouseDown = false;
+});
+{
+  const sim0 = BodyMovin.simulate;
+  BodyMovin.simulate = (fn) => sim0(fn ? ((now) => window.__simOut = fn(now) || {}) : fn);
+}
+function pct(hist, q) {
+  let tot = 0;
+  for (const c of hist) tot += c;
+  if (tot <= 0) return null;
+  let acc = 0;
+  for (let b = 0; b < hist.length; b++) {
+    acc += hist[b];
+    if (acc >= q * tot) return b / 100;
+  }
+  return (hist.length - 1) / 100;
+}
+function penUpdate(side, dt, raised) {
+  var _a, _b, _c;
+  const P = penS[side];
+  if (BodyMovin.simulating) {
+    const o = (window.__simOut || {})[side] || {}, p = (_a = o.push) != null ? _a : o.pen;
+    P.reach = p === void 0 ? 1 : +p;
+    P.down = P.reach > 0.5;
+    P.dn = 0.5;
+    P.up = 0.5;
+    return P.down;
+  }
+  if (BodyMovin.mouse) {
+    P.reach = mouseDown ? 1 : 0;
+    P.dn = 0.5;
+    P.up = 0.5;
+    return P.down = mouseDown;
+  }
+  const J = BodyMovin.joints || {}, k = side === "left" ? "l" : "r", sh = J[k + "Shoulder"], el = J[k + "Forearm"], hd = J[k + "Hand"];
+  const vis = BodyMovin.vis && BodyMovin.vis[k + "Hand"], sure = vis === void 0 || vis === null || vis >= 0.35;
+  if (!sh || !el || !hd || !J.lShoulder || !J.rShoulder) {
+    P.down = false;
+    return false;
+  }
+  let rx = J.rShoulder[0] - J.lShoulder[0], rz = J.rShoulder[2] - J.lShoulder[2];
+  const n = Math.hypot(rx, rz) || 1;
+  rx /= n;
+  rz /= n;
+  const fx = rz, fz = -rx;
+  const arm = Math.max(0.2, Math.hypot(sh[0] - el[0], sh[1] - el[1], sh[2] - el[2]) + Math.hypot(el[0] - hd[0], el[1] - hd[1], el[2] - hd[2]));
+  const ext = Math.hypot(hd[0] - sh[0], hd[1] - sh[1], hd[2] - sh[2]) / arm, fwd = ((hd[0] - sh[0]) * fx + (hd[2] - sh[2]) * fz) / arm;
+  const dn3 = clamp((sh[1] - hd[1]) / arm, -1, 1), fwdH = fwd / Math.max(0.5, dn3 > 0 ? Math.sqrt(1 - dn3 * dn3) : 1);
+  const x = 0.3 * ext + 0.7 * fwdH, a = 1 - Math.exp(-dt / PEN.tau);
+  P.e = P.e === null ? x : P.e + a * (x - P.e);
+  const r = P.e;
+  if (raised && sure) {
+    const d = Math.exp(-dt / PEN.mem);
+    for (let i = 0; i < P.h.length; i++) P.h[i] *= d;
+    P.h[clamp(Math.round(r * 100), 0, P.h.length - 1)] += dt;
+    P.w += dt;
+  }
+  const kk = Math.min(1, P.w / PEN.learn);
+  P.lo = (1 - kk) * PEN.lo0 + kk * ((_b = pct(P.h, PEN.qLo)) != null ? _b : PEN.lo0);
+  P.hi = (1 - kk) * PEN.hi0 + kk * ((_c = pct(P.h, PEN.qHi)) != null ? _c : PEN.hi0);
+  const span = Math.max(PEN.minSpan, P.hi - P.lo);
+  P.dn = Math.min(0.95, Math.max(P.lo + PEN.gapMin, P.lo + PEN.k * span));
+  P.up = P.dn - Math.max(PEN.hys, 0.25 * span);
+  P.down = (P.down ? r > P.up : r > P.dn) && raised && sure;
+  P.reach = clamp((r - P.lo) / Math.max(0.01, P.dn - P.lo), 0, 1.2);
+  return P.down;
+}
+let hitRects = [];
+const inPaintArea = (x, y) => x > 5e-3 && x < 0.995 && y > 0.01 && y < 0.99 && !hitRects.some((b) => x * W > b.x - U * 0.01 && x * W < b.x + b.w + U * 0.01 && y * H > b.y - U * 0.01 && y * H < b.y + b.h + U * 0.01);
+const brushUp = { left: false, right: false };
+const CR = { up: 0.6, down: 0.78, side: 1, len: null, on: { left: false, right: false }, keep: {} };
+function canvasReachRestore() {
+  for (const s of ["left", "right"]) {
+    const k = CR.keep[s];
+    if (k) {
+      BodyMovin.hands[s].x = k[0];
+      BodyMovin.hands[s].y = k[1];
+    }
+    CR.keep[s] = null;
+  }
+}
+function canvasReach() {
+  const B = BodyMovin, I = B.img || {};
+  CR.on.left = CR.on.right = false;
+  if (state !== "free" && state !== "challenge" || !B.live || B.mouse || B.simulating || performance.now() - (B.imgAt || 0) > 700 || !I.lShoulder || !I.rShoulder || !I.lHip || !I.rHip) return;
+  const cx = (I.lShoulder[0] + I.rShoulder[0]) / 2, cy = (I.lShoulder[1] + I.rShoulder[1]) / 2;
+  const len = Math.hypot(cx - (I.lHip[0] + I.rHip[0]) / 2, cy - (I.lHip[1] + I.rHip[1]) / 2);
+  CR.len = CR.len ? CR.len + 0.03 * (len - CR.len) : len;
+  const L = Math.max(0.05, CR.len);
+  for (const s of ["left", "right"]) {
+    const h = B.hands[s], hd = I[s[0] + "Hand"];
+    if (!h.seen || !hd) continue;
+    CR.keep[s] = [h.x, h.y];
+    CR.on[s] = true;
+    h.x = clamp(0.5 - (hd[0] - cx) / L / (2 * CR.side), 0, 1);
+    h.y = clamp(((hd[1] - cy) / L + CR.up) / (CR.up + CR.down), 0, 1);
+  }
+}
+function handActive(side) {
+  const h = BodyMovin.hands[side];
+  if (BodyMovin.mouse || BodyMovin.simulating) return h.raised !== false;
+  if (CR.on[side]) return brushUp[side] = h.y < 0.99;
+  const I = BodyMovin.img || {}, k = side === "left" ? "l" : "r", fresh = performance.now() - (BodyMovin.imgAt || 0) < 700;
+  let away = null;
+  if (fresh && I[k + "Hand"] && I[k + "Hip"] && I.lShoulder && I.rShoulder && I.lHip && I.rHip) {
+    const ch = [(I.lShoulder[0] + I.rShoulder[0]) / 2, (I.lShoulder[1] + I.rShoulder[1]) / 2], hp = [(I.lHip[0] + I.rHip[0]) / 2, (I.lHip[1] + I.rHip[1]) / 2];
+    const T = Math.max(0.05, Math.hypot(ch[0] - hp[0], ch[1] - hp[1])), hd = I[k + "Hand"], hip = I[k + "Hip"];
+    away = Math.hypot(hd[0] - hip[0], hd[1] - hip[1]) / T;
+  } else {
+    const J = BodyMovin.joints || {}, hd = J[k + "Hand"], hip = J[k + "Hip"] || J.root, sh = J[k + "Shoulder"];
+    if (hd && hip && sh) away = Math.hypot(hd[0] - hip[0], hd[1] - hip[1]) / Math.max(0.3, Math.min(0.75, sh[1] - hip[1]));
+  }
+  if (away === null) return h.raised !== false;
+  brushUp[side] = brushUp[side] ? away > 0.42 : away > 0.55;
+  return brushUp[side];
+}
+function strokeTo(side, h, t, dt) {
+  const b = brush[side];
+  if (b.base === null) b.hue += dt * 9;
+  const k = 1 - Math.exp(-dt / 0.035);
+  if (!b.pts.length || b.sx === void 0) {
+    b.sx = h.x;
+    b.sy = h.y;
+  } else {
+    b.sx += (h.x - b.sx) * k;
+    b.sy += (h.y - b.sy) * k;
+  }
+  const x = b.sx * W, y = b.sy * H, live = h.seen && state !== "title" && state !== "end" && !wipe;
+  const raised = live && handActive(side), down = live && penUpdate(side, dt, raised);
+  const can = down && inPaintArea(h.x, h.y);
+  const sp = h.speed, painting = can;
+  if (!painting) {
+    b.pts = [];
+    b.w *= 0.8;
+    b.sx = void 0;
+    b.cur = null;
+    return 0;
+  }
+  const w = U * SIZES[sizeI].k * (7e-3 + 0.02 * clamp((sp - 0.1) / 2.2, 0, 1));
+  b.w = b.w ? lerp(b.w, w, 0.25) : w;
+  const lp = b.pts[b.pts.length - 1];
+  if (lp && Math.hypot(x - lp[0], y - lp[1]) > U * 0.25) {
+    b.pts = [];
+    b.cur = null;
+  }
+  if (lp && b.pts.length && Math.hypot(x - lp[0], y - lp[1]) < U * 15e-4) return 0;
+  b.pts.push([x, y, b.w]);
+  if (b.pts.length > 3) b.pts.shift();
+  const hue = brushHue(b, t), seg = b.pts;
+  if (seg.length >= 2) {
+    const [p0, p1, p2] = seg.length === 3 ? seg : [seg[0], seg[0], seg[1]];
+    const m0 = [(p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2], m1 = [(p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2], ww = p1[2];
+    const s = [m0[0] / W, m0[1] / H, p1[0] / W, p1[1] / H, m1[0] / W, m1[1] / H, ww / U, hue, b.sat, b.erase ? 1 : 0];
+    if (!b.cur) {
+      b.cur = { side, t0: performance.now(), segs: [] };
+      strokes.push(b.cur);
+      undoClear = null;
+      bakeOld();
+    }
+    b.cur.segs.push(s);
+    drawSeg(pctx, s);
+    const d = Math.hypot(m1[0] - m0[0], m1[1] - m0[1]) / U;
+    strokeLen += d;
+    b.acc += d;
+    if (b.erase) return d;
+    if (Math.random() < 0.5) sparks.push({ x, y, vx: (Math.random() - 0.5) * U * 0.1, vy: (Math.random() - 0.5) * U * 0.1 - U * 0.02, life: 1, hue, r: U * (2e-3 + Math.random() * 4e-3) });
+    const mv = clamp((sp - 0.25) / 1.6, 0, 1);
+    if (mv > 0 && b.acc > 0.16 - 0.06 * mv && t - b.last > 0.34 - 0.14 * mv) {
+      b.acc = 0;
+      b.last = t;
+      const k2 = clamp(Math.round((1 - h.y) * (NOTES.length - 1)), 0, NOTES.length - 1);
+      if (k2 !== b.lastNote || mv > 0.6) {
+        penNote(NOTES[k2], 0.15 + 0.45 * mv, (h.x - 0.5) * 1.6, side === "left" ? "L" : "R");
+        noteCount++;
+        b.lastNote = k2;
+      }
+    }
+    return d;
+  }
+  return 0;
+}
+let constellations = [], countdown = null, lastStamp = -9;
+const EDGES = [["head", "neck"], ["neck", "lS"], ["neck", "rS"], ["lS", "lE"], ["lE", "lH"], ["rS", "rE"], ["rE", "rH"], ["neck", "hip"], ["hip", "lK"], ["lK", "lF"], ["hip", "rK"], ["rK", "rF"]];
+function bodyStars() {
+  const J = BodyMovin.joints || {}, bd = BodyMovin.body, cx = W * clamp(0.5 + (bd.x || 0) * 0.25, 0.3, 0.7);
+  const P = {};
+  if (BodyMovin.live && !BodyMovin.mouse && J.head && J.lShoulder && J.rShoulder && J.root && J.lHand && J.rHand) {
+    let r = [J.rShoulder[0] - J.lShoulder[0], 0, J.rShoulder[2] - J.lShoulder[2]];
+    const n = Math.hypot(r[0], r[2]) || 1;
+    r = [r[0] / n, 0, r[2] / n];
+    const T = Math.max(0.25, (J.lShoulder[1] + J.rShoulder[1]) / 2 - J.root[1]), s = H * 0.2 / T, ry = H * 0.6;
+    const pr = (j) => [cx + ((j[0] - J.root[0]) * r[0] + (j[2] - J.root[2]) * r[2]) * s, ry - (j[1] - J.root[1]) * s];
+    P.head = pr(J.head);
+    P.lS = pr(J.lShoulder);
+    P.rS = pr(J.rShoulder);
+    P.lH = pr(J.lHand);
+    P.rH = pr(J.rHand);
+    P.hip = pr(J.root);
+    P.lE = J.lForearm ? pr(J.lForearm) : [(P.lS[0] + P.lH[0]) / 2, (P.lS[1] + P.lH[1]) / 2 + H * 0.02];
+    P.rE = J.rForearm ? pr(J.rForearm) : [(P.rS[0] + P.rH[0]) / 2, (P.rS[1] + P.rH[1]) / 2 + H * 0.02];
+    if (J.lKnee && J.rKnee) {
+      P.lK = pr(J.lKnee);
+      P.rK = pr(J.rKnee);
+    }
+    if (J.lFoot && J.rFoot) {
+      P.lF = pr(J.lFoot);
+      P.rF = pr(J.rFoot);
+    }
+  } else {
+    const c = bd.crouch || 0, dy = c * H * 0.1, L = BodyMovin.hands.left, R = BodyMovin.hands.right;
+    P.head = [cx + (bd.lean || 0) * W * 0.03, H * 0.27 + dy];
+    P.lS = [cx - W * 0.055, H * 0.36 + dy];
+    P.rS = [cx + W * 0.055, H * 0.36 + dy];
+    P.hip = [cx, H * 0.6 + dy];
+    P.lH = L.seen ? [L.x * W, L.y * H] : [cx - W * 0.09, H * 0.6 + dy];
+    P.rH = R.seen ? [R.x * W, R.y * H] : [cx + W * 0.09, H * 0.6 + dy];
+    P.lE = [(P.lS[0] + P.lH[0]) / 2 - W * 0.02, (P.lS[1] + P.lH[1]) / 2 + H * 0.03];
+    P.rE = [(P.rS[0] + P.rH[0]) / 2 + W * 0.02, (P.rS[1] + P.rH[1]) / 2 + H * 0.03];
+  }
+  P.neck = [(P.lS[0] + P.rS[0]) / 2, (P.lS[1] + P.rS[1]) / 2];
+  const leg = H * 0.14;
+  if (!P.lK) {
+    const wide = bd.starJump ? 1.8 : 1;
+    P.lK = [P.hip[0] - W * 0.03 * wide, P.hip[1] + leg];
+    P.rK = [P.hip[0] + W * 0.03 * wide, P.hip[1] + leg];
+  }
+  if (!P.lF) {
+    const wide = bd.starJump ? 2 : 1;
+    P.lF = [P.hip[0] - W * 0.04 * wide, P.hip[1] + leg * 1.95];
+    P.rF = [P.hip[0] + W * 0.04 * wide, P.hip[1] + leg * 1.95];
+  }
+  const xs = Object.values(P).map((p) => p[0]), ys = Object.values(P).map((p) => p[1]);
+  const ox = Math.max(0, W * 0.15 - Math.min(...xs)) + Math.min(0, W * 0.87 - Math.max(...xs)), oy = Math.max(0, H * 0.05 - Math.min(...ys)) + Math.min(0, H * 0.9 - Math.max(...ys));
+  for (const k in P) P[k] = [(P[k][0] + ox) / W, (P[k][1] + oy) / H];
+  return P;
+}
+function stamp(now) {
+  const P = bodyStars(), hue = brushHue(brush.right, now / 1e3);
+  constellations.push({ P, hue, born: now, ph: Math.random() * 6 });
+  if (constellations.length > 8) constellations.shift();
+  lastStamp = now / 1e3;
+  stamps++;
+  Object.keys(P).forEach((k, i) => setTimeout(() => {
+    SFX.star(i);
+    const [x, y] = P[k];
+    for (let j = 0; j < 8; j++) sparks.push({ x: x * W, y: y * H, vx: (Math.random() - 0.5) * U * 0.4, vy: (Math.random() - 0.5) * U * 0.4, life: 1, hue, r: U * 4e-3 });
+  }, i * 70));
+  toast("★ YOU ARE A CONSTELLATION ★", hue);
+}
+function drawConstellation(c, now, target = ctx, w = W, h = H, still = false) {
+  const age = still ? 99 : (now - c.born) / 1e3, keys = Object.keys(c.P), tt = now / 1e3;
+  target.save();
+  target.globalCompositeOperation = "lighter";
+  target.lineCap = "round";
+  for (const [a, b] of EDGES) {
+    const ia = keys.indexOf(a), ib = keys.indexOf(b), k = clamp(age * 14 - Math.max(ia, ib) * 0.98, 0, 1);
+    if (k <= 0) continue;
+    const [x0, y0] = c.P[a], [x1, y1] = c.P[b];
+    target.strokeStyle = hsl(c.hue, 90, 75, 0.28);
+    target.lineWidth = U * 4e-3;
+    target.beginPath();
+    target.moveTo(x0 * w, y0 * h);
+    target.lineTo(lerp(x0, x1, k) * w, lerp(y0, y1, k) * h);
+    target.stroke();
+  }
+  keys.forEach((k, i) => {
+    const a = clamp(age * 14 - i, 0, 1);
+    if (a <= 0) return;
+    const [x, y] = c.P[k], tw = still ? 1 : 0.75 + 0.25 * Math.sin(tt * 2.2 + i * 1.7 + c.ph), r = U * (k === "head" ? 0.026 : k[1] === "H" ? 0.02 : 0.014) * tw * (1 + 0.8 * Math.exp(-(age * 14 - i) * 0.5));
+    const g = target.createRadialGradient(x * w, y * h, 0, x * w, y * h, r * 1.7);
+    g.addColorStop(0, "rgba(255,255,255,1)");
+    g.addColorStop(0.18, hsl(c.hue, 100, 82, 0.85));
+    g.addColorStop(0.45, hsl(c.hue, 100, 65, 0.18));
+    g.addColorStop(1, hsl(c.hue, 100, 60, 0));
+    target.fillStyle = g;
+    target.beginPath();
+    target.arc(x * w, y * h, r * 1.7, 0, 6.283);
+    target.fill();
+    target.strokeStyle = "rgba(255,255,255,".concat(0.5 * tw, ")");
+    target.lineWidth = U * 2e-3;
+    target.beginPath();
+    target.moveTo(x * w - r * 1.8, y * h);
+    target.lineTo(x * w + r * 1.8, y * h);
+    target.moveTo(x * w, y * h - r * 1.8);
+    target.lineTo(x * w, y * h + r * 1.8);
+    target.stroke();
+  });
+  target.restore();
+}
+BodyMovin.on("starjump", () => {
+  if ((state === "free" || state === "challenge") && !countdown && performance.now() / 1e3 - lastStamp > 3) stamp(performance.now());
+});
+const SHAPES = [
+  { name: "THE WAVE", open: true, f: (t) => [-1 + 2 * t, -0.45 * Math.sin(t * Math.PI * 2.5)] },
+  { name: "THE HEART", f: (t) => {
+    const a = t * Math.PI * 2;
+    return [Math.pow(Math.sin(a), 3), -(13 * Math.cos(a) - 5 * Math.cos(2 * a) - 2 * Math.cos(3 * a) - Math.cos(4 * a)) / 16 + 0.1];
+  } },
+  { name: "THE STAR", f: (t) => {
+    const k = t * 10, i = Math.floor(k) % 10, fr = k - Math.floor(k), p = (j) => {
+      const a = -Math.PI / 2 + j * Math.PI / 5, r = j % 2 ? 0.42 : 1;
+      return [Math.cos(a) * r, Math.sin(a) * r + 0.08];
+    };
+    const A = p(i), B = p(i + 1);
+    return [lerp(A[0], B[0], fr), lerp(A[1], B[1], fr)];
+  } },
+  { name: "THE MOON", f: (t) => {
+    const a = t * Math.PI * 2;
+    return [Math.cos(a) * 0.85, Math.sin(a) * 0.85];
+  } },
+  { name: "THE LIGHTNING", open: true, f: (t) => {
+    const P = [[-0.2, -1], [0.35, -1], [0.05, -0.15], [0.45, -0.15], [-0.3, 1], [-0.05, 0.12], [-0.45, 0.12], [-0.2, -1]];
+    const k = t * 7, i = Math.min(6, Math.floor(k)), fr = k - i;
+    return [lerp(P[i][0], P[i + 1][0], fr), lerp(P[i][1], P[i + 1][1], fr)];
+  } }
+];
+let shape = null, shapeI = 0, shapeT0 = 0, tol = 0, totalScore = 0, shapesDone = 0, accs = [], onPath = 0, offPath = 0, celebrate = 0, roundT0 = 0, endInfo = null;
+function layoutShape() {
+  const cx = 0.5, cy = 0.54, sx = shape.def.open && shape.def.name === "THE WAVE" ? 0.27 : 0.3 * H / W, sy = 0.27;
+  shape.pts = shape.raw.map(([u, v]) => [cx + u * sx, cy + v * sy]);
+}
+function newShape() {
+  const def = SHAPES[shapeI % SHAPES.length], N = 64, dense = [];
+  for (let i = 0; i <= 600; i++) dense.push(def.f(i / 600));
+  const L = [0];
+  for (let i = 1; i < dense.length; i++) L.push(L[i - 1] + Math.hypot(dense[i][0] - dense[i - 1][0], dense[i][1] - dense[i - 1][1]));
+  const raw = [];
+  let j = 0;
+  for (let k = 0; k < N; k++) {
+    const s = L[L.length - 1] * k / (def.open ? N - 1 : N);
+    while (j < L.length - 2 && L[j + 1] < s) j++;
+    const f = (s - L[j]) / (L[j + 1] - L[j] || 1);
+    raw.push([lerp(dense[j][0], dense[j + 1][0], f), lerp(dense[j][1], dense[j + 1][1], f)]);
+  }
+  shape = { def, raw, lit: new Array(N).fill(0), litAt: new Array(N).fill(0), pts: null };
+  layoutShape();
+  shapeT0 = performance.now() / 1e3;
+  onPath = 0;
+  offPath = 0;
+  celebrate = 0;
+  wipeAll();
+  undoClear = null;
+}
+const SHAPE_TIME = 25;
+function updateChallenge(now, painted) {
+  const t = now / 1e3;
+  if (celebrate) {
+    if (t - celebrate > 1.6) {
+      shapeI++;
+      newShape();
+    }
+    return;
+  }
+  const tolPx = tol * U;
+  for (const side of ["left", "right"]) {
+    const h = BodyMovin.hands[side];
+    if (!h.seen || !penS[side].down) continue;
+    const x = h.x * W, y = h.y * H;
+    let near = Infinity;
+    shape.pts.forEach((p, i) => {
+      const d = Math.hypot(p[0] * W - x, p[1] * H - y);
+      near = Math.min(near, d);
+      if (d < tolPx && !shape.lit[i] && h.speed > 0.05) {
+        shape.lit[i] = 1;
+        shape.litAt[i] = t;
+        SFX.star(i % 10);
+        for (let k = 0; k < 6; k++) sparks.push({ x: p[0] * W, y: p[1] * H, vx: (Math.random() - 0.5) * U * 0.3, vy: (Math.random() - 0.5) * U * 0.3, life: 1, hue: 50, r: U * 4e-3 });
+      }
+    });
+    const pd = painted[side];
+    if (pd) {
+      if (near < tolPx * 1.7) onPath += pd;
+      else offPath += pd;
+    }
+  }
+  const cov = shape.lit.reduce((a, b) => a + b, 0) / shape.lit.length, el = t - shapeT0;
+  if (el > 12 && cov < 0.35 && tol < 0.12) tol = Math.min(0.12, tol * 1.0035);
+  const timeUp = el > SHAPE_TIME || t - roundT0 > ROUND;
+  if (cov >= 0.92 || timeUp) {
+    const prec = onPath + offPath > 0.05 ? onPath / (onPath + offPath) : cov > 0.5 ? 0.8 : 0, acc = Math.round(100 * (0.75 * cov + 0.25 * prec));
+    const bonus = cov >= 0.92 ? Math.round(Math.max(0, SHAPE_TIME - el) * 8) : 0;
+    const roundOver = t - roundT0 > ROUND, partial2 = roundOver && cov < 0.3;
+    totalScore += acc * 10 + bonus;
+    if (!partial2) accs.push(acc);
+    if (cov >= 0.92) {
+      shapesDone++;
+      SFX.win();
+      tol = Math.max(0.065, tol * 0.92);
+      toast("".concat(shape.def.name, "  ·  ").concat(acc, "%").concat(bonus ? "  ·  +".concat(bonus, " speed") : ""), 50);
+      for (const p of shape.pts) for (let k = 0; k < 3; k++) sparks.push({ x: p[0] * W, y: p[1] * H, vx: (Math.random() - 0.5) * U * 0.6, vy: (Math.random() - 0.5) * U * 0.6, life: 1.2, hue: 45 + Math.random() * 30, r: U * 5e-3 });
+    } else if (!partial2) toast("".concat(shape.def.name, "  ·  ").concat(acc, "%"), 200);
+    if (t - roundT0 > ROUND) return endChallenge();
+    celebrate = t;
+  }
+}
+function drawShape(now) {
+  if (!shape) return;
+  const t = now / 1e3, tolPx = tol * U, N = shape.pts.length;
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.strokeStyle = "rgba(255,240,200,0.12)";
+  ctx.lineWidth = tolPx * 1.4;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  shape.pts.forEach(([x, y], i) => i ? ctx.lineTo(x * W, y * H) : ctx.moveTo(x * W, y * H));
+  if (!shape.def.open) ctx.closePath();
+  ctx.stroke();
+  const cel = celebrate ? t - celebrate : 0;
+  let nextI = shape.lit.findIndex((l, i) => !l && (i === 0 || shape.lit[i - 1]));
+  if (nextI < 0) nextI = shape.lit.indexOf(0);
+  shape.pts.forEach(([x, y], i) => {
+    const lit = shape.lit[i], age = lit ? t - shape.litAt[i] : 0, X = x * W, Y = y * H;
+    const r = lit ? U * (0.011 + 0.02 * Math.exp(-age * 4) + (cel ? 0.01 * Math.sin(cel * 8 + i * 0.4) : 0)) : U * (6e-3 + 2e-3 * Math.sin(t * 3 + i));
+    const g = ctx.createRadialGradient(X, Y, 0, X, Y, r * 3);
+    g.addColorStop(0, lit ? "rgba(255,255,255,1)" : "rgba(255,240,210,0.7)");
+    g.addColorStop(0.3, lit ? "rgba(255,215,120,0.9)" : "rgba(255,220,160,0.25)");
+    g.addColorStop(1, "rgba(255,200,100,0)");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(X, Y, r * 3, 0, 6.283);
+    ctx.fill();
+  });
+  if (!cel && nextI >= 0) {
+    const [x, y] = shape.pts[nextI], k = t * 1.5 % 1;
+    ctx.strokeStyle = "rgba(255,230,150,".concat(0.8 * (1 - k), ")");
+    ctx.lineWidth = U * 5e-3;
+    ctx.beginPath();
+    ctx.arc(x * W, y * H, tolPx * (0.4 + k * 0.9), 0, 6.283);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+function startChallenge() {
+  audioInit();
+  try {
+    if (!MUTE && BodyMovin.music) BodyMovin.music("painter");
+  } catch (e) {
+  }
+  SFX.click();
+  state = "challenge";
+  shapeI = 0;
+  totalScore = 0;
+  shapesDone = 0;
+  accs = [];
+  tol = 0.095;
+  endInfo = null;
+  constellations = [];
+  BodyMovin.activity.activeSec = 0;
+  BodyMovin.activity.kcal = 0;
+  roundT0 = performance.now() / 1e3;
+  newShape();
+  focusId = null;
+}
+function startFree() {
+  audioInit();
+  try {
+    if (!MUTE && BodyMovin.music) BodyMovin.music("painter");
+  } catch (e) {
+  }
+  SFX.click();
+  if (state === "challenge" || state === "title") {
+    wipeAll();
+    undoClear = null;
+    constellations = [];
+  }
+  shape = null;
+  if (state === "title") {
+    BodyMovin.activity.activeSec = 0;
+    BodyMovin.activity.kcal = 0;
+  }
+  state = "free";
+  focusId = null;
+  endInfo = null;
+}
+function finishSession(mode) {
+  const prevBest = BodyMovin.best(GAME), act = { min: BodyMovin.activity.activeSec / 60, kcal: BodyMovin.activity.kcal };
+  if (mode === "challenge") {
+    BodyMovin.saveSession({ game: GAME, score: totalScore });
+    if (BodyMovin.highScores) BodyMovin.highScores(GAME, totalScore, { title: "SKY PAINTER" });
+  } else BodyMovin.saveSession({ game: GAME });
+  endInfo = { mode, prevBest, best: Math.max(prevBest, mode === "challenge" ? totalScore : 0), newBest: mode === "challenge" && totalScore > prevBest && totalScore > 0, ...act, t0: performance.now(), strokes: strokeLen, stamps };
+  state = "end";
+  focusId = null;
+  SFX.win();
+}
+function endChallenge() {
+  finishSession("challenge");
+}
+function finishFree() {
+  SFX.click();
+  finishSession("free");
+}
+function goHome() {
+  audioInit();
+  SFX.click();
+  setTimeout(() => location.href = "index.html", 160);
+}
+let wipe = null;
+function clearSky() {
+  if (wipe) return;
+  audioInit();
+  if (strokes.length || constellations.length) {
+    const base = document.createElement("canvas");
+    base.width = paintBase.width;
+    base.height = paintBase.height;
+    base.getContext("2d").drawImage(paintBase, 0, 0);
+    undoClear = { strokes, constellations: constellations.slice(), base };
+  }
+  wipe = { t0: performance.now() };
+  SFX.shimmer();
+}
+function saveImage() {
+  audioInit();
+  SFX.click();
+  const out = document.createElement("canvas");
+  out.width = W;
+  out.height = H;
+  const o = out.getContext("2d");
+  const shot = window.__snapshot && window.__snapshot();
+  if (shot) o.drawImage(shot, 0, 0, W, H);
+  else {
+    o.drawImage(skyC, 0, 0);
+    o.globalCompositeOperation = "lighter";
+    o.drawImage(paint, 0, 0);
+    o.globalCompositeOperation = "source-over";
+    for (const c of constellations) drawConstellation(c, performance.now(), o, W, H, true);
+  }
+  o.font = "600 ".concat(U * 0.022, "px ").concat(FONT);
+  o.fillStyle = "rgba(255,255,255,0.45)";
+  o.textAlign = "right";
+  o.fillText("Sky Painter · Body Movin'", W - U * 0.03, H - U * 0.03);
+  out.toBlob((blob) => {
+    if (!blob) return;
+    const url = URL.createObjectURL(blob), a = document.createElement("a"), d = /* @__PURE__ */ new Date();
+    a.href = url;
+    a.download = "sky-painting-".concat(d.toISOString().slice(0, 10), "-").concat(String(d.getHours()).padStart(2, "0")).concat(String(d.getMinutes()).padStart(2, "0"), ".png");
+    window.__lastSave = { name: a.download, bytes: blob.size, w: W, h: H };
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4e3);
+    toast("SAVED  ·  check your Downloads", 150);
+    saveFlash = 1;
+  }, "image/png");
+}
+let saveFlash = 0, stamps = 0;
+let toasts = [], sparks = [];
+function toast(text, hue) {
+  toasts = [{ text, hue, t0: performance.now() }];
+}
+let buttons = [], focusId = null;
+function button(id, label, x, y, w, h, onPress, o = {}) {
+  buttons.push({ id, label, x, y, w, h, onPress, ms: o.ms || 700, primary: !!o.primary, hue: o.hue, sw: o.sw, perHand: !!o.perHand, kind: o.kind, active: o.active, icon: o.icon, pill: !!o.pill });
+}
+function updateButtons(now) {
+  var _a, _b;
+  for (const b of buttons) {
+    if (b.perHand) {
+      const any = BodyMovin.handOver(b, W, H);
+      b.fill = 0;
+      for (const side of ["left", "right"]) {
+        const h = BodyMovin.hands[side], m = U * 0.06, hx = ((_a = h.px) != null ? _a : h.x) * W, hy = ((_b = h.py) != null ? _b : h.y) * H;
+        const over = any && h.seen && (h.raised !== false || BodyMovin.mouse || BodyMovin.simulating) && hx > b.x - m && hx < b.x + b.w + m && hy > b.y - m && hy < b.y + b.h + m;
+        const f = BodyMovin.dwell(state + b.id + side, over, now, b.ms);
+        b.fill = Math.max(b.fill, f);
+        if (f === 1) b.onPress(side);
+      }
+      continue;
+    }
+    b.fill = BodyMovin.dwell(state + b.id, BodyMovin.handOver(b, W, H), now, b.ms);
+    if (b.fill === 1) {
+      b.onPress("right");
+      return;
+    }
+  }
+}
+function rr(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, r);
+}
+const PX = (v) => v * DPR;
+function btnFont(b, frac) {
+  return Math.max(PX(14), Math.min(b.h * frac, b.w * 0.16));
+}
+function fitText(text, x, y, maxW, fs, weight = 800) {
+  ctx.font = "".concat(weight, " ").concat(fs, "px ").concat(FONT);
+  const mw = ctx.measureText(text).width;
+  if (mw > maxW) {
+    fs *= maxW / mw;
+    ctx.font = "".concat(weight, " ").concat(fs, "px ").concat(FONT);
+  }
+  ctx.fillText(text, x, y);
+}
+const swCol = (sw, l = 60, t = performance.now()) => {
+  var _a;
+  return sw.hue === null ? hsl(t / 12, 95, 64) : hsl(sw.hue, (_a = sw.sat) != null ? _a : 100, sw.sat === 0 ? 94 : l);
+};
+function drawButton(b) {
+  var _a, _b;
+  const focus = focusId === b.id, r = b.pill ? b.h / 2 : Math.min(b.h, b.w) * 0.28;
+  ctx.save();
+  if (b.kind === "swatch") {
+    const sw = SWATCHES[b.sw], rad = Math.min(b.w, b.h) * 0.3;
+    if (sw.hue === null) {
+      const g = ctx.createLinearGradient(b.x, b.y, b.x + b.w, b.y + b.h);
+      for (let i = 0; i <= 6; i++) g.addColorStop(i / 6, hsl(i * 60, 95, 62));
+      ctx.fillStyle = g;
+    } else ctx.fillStyle = swCol(sw);
+    rr(b.x, b.y, b.w, b.h, rad);
+    ctx.fill();
+    if (b.fill > 0) {
+      ctx.save();
+      rr(b.x, b.y, b.w, b.h, rad);
+      ctx.clip();
+      ctx.fillStyle = "rgba(255,255,255,0.55)";
+      ctx.fillRect(b.x, b.y + b.h * (1 - b.fill), b.w, b.h * b.fill);
+      ctx.restore();
+    }
+    ctx.lineWidth = PX(1);
+    ctx.strokeStyle = "rgba(255,255,255,0.35)";
+    rr(b.x, b.y, b.w, b.h, rad);
+    ctx.stroke();
+    let ring = 0;
+    for (const side of ["left", "right"]) {
+      const br = brush[side];
+      if (br.erase || br.base !== sw.hue || ((_a = br.sat) != null ? _a : 100) !== ((_b = sw.sat) != null ? _b : 100)) continue;
+      const o = PX(3 + ring * 5);
+      ctx.lineWidth = PX(4);
+      ctx.strokeStyle = BodyMovin.handColor ? BodyMovin.handColor[side] : "#fff";
+      rr(b.x - o, b.y - o, b.w + 2 * o, b.h + 2 * o, rad + o);
+      ctx.stroke();
+      ring++;
+    }
+    if (focus) {
+      ctx.lineWidth = PX(2);
+      ctx.strokeStyle = "#fff";
+      rr(b.x + PX(4), b.y + PX(4), b.w - PX(8), b.h - PX(8), rad);
+      ctx.stroke();
+    }
+    ctx.restore();
+    return;
+  }
+  ctx.fillStyle = b.primary || b.active ? "rgba(120,90,255,0.48)" : "rgba(10,12,24,0.58)";
+  rr(b.x, b.y, b.w, b.h, r);
+  ctx.fill();
+  if (b.fill > 0) {
+    ctx.save();
+    rr(b.x, b.y, b.w, b.h, r);
+    ctx.clip();
+    ctx.fillStyle = "rgba(255,255,255,0.28)";
+    if (b.perHand) ctx.fillRect(b.x, b.y + b.h * (1 - b.fill), b.w, b.h * b.fill);
+    else ctx.fillRect(b.x, b.y, b.w * b.fill, b.h);
+    ctx.restore();
+  }
+  ctx.lineWidth = PX(focus || b.active ? 3 : 1);
+  ctx.strokeStyle = focus ? "#ffffff" : b.active ? "rgba(220,205,255,0.95)" : b.primary ? "rgba(200,185,255,0.7)" : "rgba(255,255,255,0.18)";
+  rr(b.x, b.y, b.w, b.h, r);
+  ctx.stroke();
+  ctx.fillStyle = "#fff";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  if (ctx.letterSpacing !== void 0) ctx.letterSpacing = "0px";
+  const lab = () => {
+    ctx.fillStyle = "#fff";
+    fitText(b.label, b.x + b.w / 2, b.y + b.h * 0.78, b.w * 0.88, btnFont(b, 0.21));
+  };
+  if (b.kind === "size") {
+    const cy = b.y + b.h * 0.38, R = Math.min(b.h * 0.15, b.w * 0.09);
+    SIZES.forEach((s, i) => {
+      const cx = b.x + b.w * (0.27 + 0.23 * i), rad = R * (0.45 + 0.35 * i);
+      ctx.fillStyle = i === sizeI ? "#ffffff" : "rgba(255,255,255,0.3)";
+      ctx.beginPath();
+      ctx.arc(cx, cy, rad, 0, 6.283);
+      ctx.fill();
+    });
+    lab();
+  } else if (b.kind === "music") {
+    const off = !!BodyMovin.musicOff;
+    ctx.font = "".concat(b.h * 0.32, "px ").concat(FONT);
+    ctx.fillText("🎵", b.x + b.w / 2, b.y + b.h * 0.37);
+    if (off) {
+      ctx.strokeStyle = "#ff8fa3";
+      ctx.lineWidth = PX(3);
+      ctx.beginPath();
+      ctx.moveTo(b.x + b.w * 0.36, b.y + b.h * 0.2);
+      ctx.lineTo(b.x + b.w * 0.64, b.y + b.h * 0.54);
+      ctx.stroke();
+    }
+    lab();
+  } else if (b.icon) {
+    ctx.font = "".concat(b.h * 0.32, "px ").concat(FONT);
+    ctx.fillText(b.icon, b.x + b.w / 2, b.y + b.h * 0.37);
+    lab();
+  } else {
+    let fs = Math.max(PX(14), b.h * (b.pill ? 0.4 : 0.36));
+    ctx.font = "800 ".concat(fs, "px ").concat(FONT);
+    if (ctx.letterSpacing !== void 0) ctx.letterSpacing = "".concat(fs * 0.06, "px");
+    const mw = ctx.measureText(b.label).width;
+    if (mw > b.w * 0.84) {
+      fs *= b.w * 0.84 / mw;
+      ctx.font = "800 ".concat(fs, "px ").concat(FONT);
+    }
+    ctx.fillText(b.label, b.x + b.w / 2, b.y + b.h / 2 + b.h * 0.02);
+  }
+  ctx.restore();
+}
+function camBand() {
+  const e = document.getElementById("bp-cam");
+  if (!e || e.style.display === "none") return null;
+  const r = e.getBoundingClientRect();
+  return { x: PX(r.left), y: PX(r.top), w: PX(r.width), h: PX(r.height) };
+}
+function homeButton() {
+  if (BodyMovin.sysMode && BodyMovin.sysMode() === "play") return;
+  const S = SYS();
+  button("home", "← HOME", PX(S.L), PX(S.T), PX(S.Wb), PX(S.Hh), goHome, { ms: 1100, pill: true });
+}
+cv.addEventListener("pointerdown", (e) => {
+  audioInit();
+  const x = e.clientX * DPR, y = e.clientY * DPR;
+  for (const b of buttons) if (x > b.x && x < b.x + b.w && y > b.y && y < b.y + b.h) {
+    b.onPress("right");
+    return;
+  }
+});
+addEventListener("keydown", (e) => {
+  audioInit();
+  if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Tab"].includes(e.key) && buttons.length) {
+    e.preventDefault();
+    const i = buttons.findIndex((b) => b.id === focusId), d = e.key === "ArrowLeft" || e.key === "ArrowUp" || e.key === "Tab" && e.shiftKey ? -1 : 1;
+    focusId = buttons[(i + d + buttons.length) % buttons.length].id;
+    return;
+  }
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    const b = buttons.find((b2) => b2.id === focusId) || buttons.find((b2) => b2.primary);
+    if (b) b.onPress("right");
+  }
+  if ((e.key === "z" || e.key === "Z") && (state === "free" || state === "challenge")) undo();
+  if (e.key === "Escape" && state !== "end") goHome();
+});
+function glowText(text, x, y, size2, col, { weight = 800, align = "center", blur = 0.35, alpha = 1, spacing = 0 } = {}) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.font = "".concat(weight, " ").concat(size2, "px ").concat(FONT);
+  ctx.textAlign = align;
+  ctx.textBaseline = "middle";
+  if (ctx.letterSpacing !== void 0) ctx.letterSpacing = "".concat(spacing * size2, "px");
+  ctx.shadowColor = "rgba(0,0,0,0.55)";
+  ctx.shadowOffsetX = size2 * 0.02;
+  ctx.shadowOffsetY = size2 * 0.05;
+  ctx.fillStyle = col;
+  ctx.fillText(text, x, y);
+  ctx.restore();
+}
+function pickColor(i, side) {
+  var _a, _b;
+  const sw = SWATCHES[i], b = brush[side];
+  b.erase = false;
+  b.base = sw.hue;
+  b.sat = (_a = sw.sat) != null ? _a : 100;
+  if (sw.hue !== null) b.hue = sw.hue;
+  SFX.pick(NOTES[Math.min(NOTES.length - 1, 2 + i)]);
+  toast("".concat(side === "left" ? "Left" : "Right", " hand: ").concat(sw.name.toLowerCase()), (_b = sw.hue) != null ? _b : performance.now() / 20);
+}
+function toggleEraser(side) {
+  const b = brush[side];
+  b.erase = !b.erase;
+  SFX.pick(NOTES[b.erase ? 3 : 7]);
+  toast(b.erase ? "".concat(side === "left" ? "Left" : "Right", " hand: eraser") : "".concat(side === "left" ? "Left" : "Right", " hand: paint"), 200);
+}
+function nextSize() {
+  sizeI = (sizeI + 1) % SIZES.length;
+  SFX.pick(NOTES[4 + sizeI * 3]);
+  toast("Brush: ".concat(SIZES[sizeI].name.toLowerCase()), 200);
+}
+function toggleMusic() {
+  audioInit();
+  if (BodyMovin.setMusicOff) BodyMovin.setMusicOff(!BodyMovin.musicOff);
+  SFX.click();
+}
+function starMe(now) {
+  if (!countdown) {
+    countdown = { t0: now, n: 3 };
+    SFX.tick();
+  }
+}
+function sharedMusicRect() {
+  for (const e of document.querySelectorAll('#bp-music, [aria-label*="music" i]')) {
+    if (e === cv) continue;
+    const r = e.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== "hidden" && +getComputedStyle(e).opacity !== 0) return { x: r.left, y: r.top, w: r.width, h: r.height };
+  }
+  return null;
+}
+function pauseBox() {
+  const e = document.getElementById("bp-pause");
+  if (e) {
+    const r = e.getBoundingClientRect();
+    if (r.width > 0) return { x: r.left, y: r.top, w: r.width, h: r.height };
+  }
+  const vm = Math.min(innerWidth, innerHeight) / 100, s = Math.max(76, 11 * vm);
+  return { x: 1.6 * vm, y: 1.6 * vm, w: s, h: s };
+}
+let TL = null;
+function toolLayout() {
+  const iw = innerWidth, ih = innerHeight, mn = Math.min(iw, ih), m = Math.max(10, 1.8 * mn / 100), P = pauseBox(), hand = Math.max(18, 0.05 * mn);
+  const SM = sharedMusicRect(), withMusic = !SM;
+  const sw = [], land = iw > ih * 1.05;
+  const magR = P.x + P.w + 0.07 * mn, magB = P.y + P.h + 0.11 * mn;
+  let palBottom;
+  if (land) {
+    const x0 = magR + hand, x1 = SM && SM.y < 0.2 * ih && SM.x > iw / 2 ? SM.x - hand : iw - m, cell = (x1 - x0) / SWATCHES.length, w = cell * 0.8, h = Math.max(w, 0.165 * ih);
+    SWATCHES.forEach((_, i) => sw.push({ x: x0 + i * cell + (cell - w) / 2, y: m, w, h }));
+    palBottom = m + h;
+  } else {
+    const n = SWATCHES.length / 2, x0 = m, cell = (iw - 2 * m) / n, w = cell * 0.8, h = Math.max(w * 1.3, 0.07 * ih), rg = cell - w, y0 = Math.max(magB + hand * 0.5, 0.2 * ih - h / 2 + 2, SM && SM.y < 0.2 * ih ? SM.y + SM.h + hand * 0.5 : 0);
+    SWATCHES.forEach((_, i) => sw.push({ x: x0 + i % n * cell + (cell - w) / 2, y: y0 + Math.floor(i / n) * (h + rg), w, h }));
+    palBottom = y0 + 2 * h + rg;
+  }
+  const top = Math.max(palBottom + hand, magB + hand * 0.5), tw = clamp(0.16 * mn, 78, 160), maxTh = clamp(0.13 * mn, 56, 110), gapMin = Math.max(12, 0.04 * mn);
+  let camTop = ih - m - Math.max(72, 0.15 * mn);
+  const cam = document.getElementById("bp-cam");
+  if (cam) {
+    const r = cam.getBoundingClientRect();
+    if (r.width && r.left < tw + 3 * m) camTop = Math.min(camTop, r.top);
+  }
+  const col = (ids, x, y0, y1) => {
+    const n = ids.length, th = Math.max(40, Math.min(maxTh, (y1 - y0 - (n - 1) * gapMin) / n)), g = n > 1 ? Math.max(0, (y1 - y0 - n * th) / (n - 1)) : 0;
+    return Object.fromEntries(ids.map((id, i) => [id, { x, y: y0 + i * (th + g), w: tw, h: th }]));
+  };
+  const left = col(["clear", "undo", "eraser", "size"], m, top, camTop - hand);
+  const rx = iw - m - tw, music = withMusic ? { x: rx, y: ih - m - maxTh, w: tw, h: maxTh } : null;
+  let rTop = top, rBot = music ? music.y - 2 * hand : ih - m;
+  if (SM && SM.x + SM.w > rx) {
+    if (SM.y + SM.h / 2 < ih / 2) rTop = Math.max(rTop, SM.y + SM.h + hand);
+    else rBot = Math.min(rBot, SM.y - hand);
+  }
+  const right = col(["finish", "save", "stamp"], rx, rTop, rBot);
+  return TL = { sw, palBottom, top, tw, m, hand, ...left, ...right, music };
+}
+function sidePanels(now) {
+  const L = toolLayout(), R = (r) => [PX(r.x), PX(r.y), PX(r.w), PX(r.h)];
+  L.sw.forEach((r, i) => button("c" + i, SWATCHES[i].name, ...R(r), (side) => pickColor(i, side || "right"), { ms: 700, perHand: true, kind: "swatch", sw: i }));
+  const erasing = brush.left.erase || brush.right.erase;
+  button("clear", "CLEAR", ...R(L.clear), clearSky, { ms: 1300, icon: "✨" });
+  button("undo", "UNDO", ...R(L.undo), undo, { ms: 800, icon: "↩️" });
+  button("eraser", "ERASER", ...R(L.eraser), (side) => toggleEraser(side || "right"), { ms: 800, icon: "🧽", perHand: true, active: erasing });
+  button("size", "SIZE", ...R(L.size), nextSize, { ms: 800, kind: "size" });
+  button("finish", "FINISH", ...R(L.finish), state === "challenge" ? endChallenge : finishFree, { ms: 1400, icon: "🏁" });
+  button("save", "SAVE", ...R(L.save), saveImage, { ms: 900, icon: "💾" });
+  button("stamp", "STAR ME", ...R(L.stamp), () => starMe(now), { ms: 1e3, icon: "⭐" });
+  if (L.music) button("music", BodyMovin.musicOff ? "MUSIC OFF" : "MUSIC", ...R(L.music), toggleMusic, { ms: 800, kind: "music" });
+}
+function topPill(text) {
+  const S = SYS(), L = TL || toolLayout();
+  ctx.save();
+  let fs = PX(Math.max(16, 2.8 * S.vm));
+  ctx.font = "800 ".concat(fs, "px ").concat(FONT);
+  const maxW = W - 2 * PX(L.m + L.tw + L.hand);
+  let w = ctx.measureText(text).width + fs * 1.6;
+  if (w > maxW) {
+    fs *= maxW / w;
+    ctx.font = "800 ".concat(fs, "px ").concat(FONT);
+    w = maxW;
+  }
+  const h = PX(S.Hh), x = W / 2 - w / 2, y = PX(L.palBottom + L.hand * 0.6);
+  ctx.fillStyle = "rgba(10,12,24,0.55)";
+  rr(x, y, w, h, h / 2);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.18)";
+  ctx.lineWidth = PX(1);
+  ctx.stroke();
+  ctx.fillStyle = "#fff";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, W / 2, y + h / 2 + h * 0.03);
+  ctx.restore();
+  window.__pill = { x: x / DPR, y: y / DPR, w: w / DPR, h: h / DPR };
+}
+function promptLine(text, hue, alpha = 1) {
+  if (document.getElementById("bp-pausehint")) return;
+  ctx.save();
+  let fs = Math.max(PX(16), U * 0.04);
+  ctx.font = "700 ".concat(fs, "px ").concat(FONT);
+  ctx.globalAlpha = alpha;
+  const playing = state === "free" || state === "challenge", L = playing ? TL || toolLayout() : null, maxW = playing ? W - 2 * PX(L.m + L.tw + L.hand) : W - PX(2 * SYS().L);
+  let w = ctx.measureText(text).width + fs * 1.6;
+  if (w > maxW) {
+    fs *= maxW / w;
+    ctx.font = "700 ".concat(fs, "px ").concat(FONT);
+    w = maxW;
+  }
+  const h = fs * 2, x = W / 2 - w / 2, y = H - PX(SYS().L) - h - U * 0.02;
+  ctx.fillStyle = "rgba(10,12,24,0.55)";
+  rr(x, y, w, h, h / 2);
+  ctx.fill();
+  ctx.fillStyle = hue == null ? "#ffffff" : hsl(hue, 90, 80);
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, W / 2, y + h / 2 + fs * 0.04);
+  ctx.restore();
+  window.__prompt = { x: x / DPR, y: y / DPR, w: w / DPR, h: h / DPR, text, t: performance.now() };
+}
+let state = "title", lastNow = 0, titleT0 = performance.now(), titleAuto = TV, shooting = [];
+function frame(now) {
+  canvasReachRestore();
+  BodyMovin.update(now);
+  canvasReach();
+  const dt = Math.min(0.05, (now - (lastNow || now)) / 1e3) || 1 / 60;
+  lastNow = now;
+  const t = now / 1e3;
+  buttons = [];
+  hudCtx.clearRect(0, 0, W, H);
+  gctx.clearRect(0, 0, W, H);
+  ctx = gctx;
+  const painted = { left: strokeTo("left", BodyMovin.hands.left, t, dt), right: strokeTo("right", BodyMovin.hands.right, t, dt) };
+  if (state === "challenge") drawShape(now);
+  ctx.drawImage(paint, 0, 0);
+  for (const c of constellations) drawConstellation(c, now);
+  if (state === "challenge" && shape) updateChallenge(now, painted);
+  if (wipe) {
+    const k = clamp((now - wipe.t0) / 900, 0, 1), x = W * k * 1.1;
+    pctx.save();
+    pctx.globalCompositeOperation = "destination-out";
+    pctx.fillStyle = "#000";
+    pctx.fillRect(0, 0, x - W * 0.04, H);
+    pctx.restore();
+    constellations = constellations.filter((c) => Object.values(c.P).some((p) => p[0] * W > x));
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    const g = ctx.createLinearGradient(x - W * 0.12, 0, x, 0);
+    g.addColorStop(0, "rgba(160,200,255,0)");
+    g.addColorStop(1, "rgba(220,235,255,0.35)");
+    ctx.fillStyle = g;
+    ctx.fillRect(x - W * 0.12, 0, W * 0.12, H);
+    ctx.restore();
+    for (let i = 0; i < 6; i++) sparks.push({ x: x + (Math.random() - 0.5) * W * 0.03, y: Math.random() * H, vx: U * (0.1 + Math.random() * 0.3), vy: (Math.random() - 0.5) * U * 0.2, life: 1, hue: 190 + Math.random() * 80, r: U * (2e-3 + Math.random() * 4e-3) });
+    if (k >= 1) {
+      const u = undoClear;
+      wipeAll();
+      undoClear = u;
+      constellations = [];
+      wipe = null;
+      if (shape) {
+        onPath = 0;
+        offPath = 0;
+      }
+    }
+  }
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  for (let i = sparks.length - 1; i >= 0; i--) {
+    const p = sparks[i];
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.vx *= 0.96;
+    p.vy *= 0.96;
+    p.vy += U * 0.02 * dt;
+    p.life -= dt * 1.1;
+    if (p.life <= 0) {
+      sparks.splice(i, 1);
+      continue;
+    }
+    ctx.fillStyle = hsl(p.hue, 100, 75, p.life);
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r * (0.4 + p.life), 0, 6.283);
+    ctx.fill();
+  }
+  ctx.restore();
+  if (sparks.length > 1500) sparks.splice(0, sparks.length - 1500);
+  if (state === "title") drawTitleLight(now);
+  ctx = hudCtx;
+  if (state === "title") drawTitle(now);
+  else if (state === "end") drawEnd(now);
+  else drawPainting(now);
+  for (const b of buttons) drawButton(b);
+  if (state === "free" || state === "challenge") for (const side of ["left", "right"]) {
+    const h = BodyMovin.hands[side];
+    if (!h.seen) continue;
+    const br = brush[side], P = penS[side], down = P.down && inPaintArea(h.x, h.y);
+    const hue = brushHue(br, t), x = h.x * W, y = h.y * H, r = Math.max(U * 0.016, U * SIZES[sizeI].k * 0.018);
+    const col = br.erase ? "#ffffff" : br.base === null ? hsl(hue, 100, 66) : hsl(hue, br.sat, br.sat < 20 ? 95 : 64);
+    ctx.save();
+    if (down) {
+      if (!br.erase) {
+        const g = ctx.createRadialGradient(x, y, 0, x, y, r * 2.2);
+        g.addColorStop(0, hsl(hue, br.sat, 80, 0.6));
+        g.addColorStop(1, hsl(hue, br.sat, 60, 0));
+        ctx.globalCompositeOperation = "lighter";
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(x, y, r * 2.2, 0, 6.283);
+        ctx.fill();
+        ctx.globalCompositeOperation = "source-over";
+      }
+      ctx.fillStyle = br.erase ? "rgba(10,12,24,0.85)" : col;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, 6.283);
+      ctx.fill();
+      ctx.lineWidth = PX(2.5);
+      ctx.strokeStyle = "#ffffff";
+      ctx.stroke();
+    } else {
+      ctx.lineWidth = PX(3);
+      ctx.strokeStyle = "rgba(0,0,0,0.45)";
+      ctx.beginPath();
+      ctx.arc(x, y, r + PX(1.5), 0, 6.283);
+      ctx.stroke();
+      ctx.strokeStyle = col;
+      ctx.setLineDash(br.erase ? [PX(5), PX(4)] : []);
+      ctx.lineWidth = PX(3);
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, 6.283);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      const k = clamp(P.reach, 0, 1);
+      if (k > 0.02) {
+        ctx.strokeStyle = "rgba(255,255,255,0.9)";
+        ctx.lineWidth = PX(3);
+        ctx.beginPath();
+        ctx.arc(x, y, r + PX(6), -Math.PI / 2, -Math.PI / 2 + k * 6.283);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+  BodyMovin.drawHands(ctx, W, H, 0.85);
+  for (let i = toasts.length - 1; i >= 0; i--) {
+    const o = toasts[i], a = (now - o.t0) / 1e3;
+    if (a > 2.6) {
+      toasts.splice(i, 1);
+      continue;
+    }
+    promptLine(o.text, o.hue, Math.min(1, 3 - a));
+  }
+  if (saveFlash > 0) {
+    ctx.fillStyle = "rgba(255,255,255,".concat(saveFlash * 0.25, ")");
+    ctx.fillRect(0, 0, W, H);
+    saveFlash = Math.max(0, saveFlash - dt * 3);
+  }
+  updateButtons(now);
+  hitRects = buttons.map((b) => ({ x: b.x, y: b.y, w: b.w, h: b.h }));
+  window.__game = {
+    endNow: () => {
+      if (state === "challenge") endChallenge();
+      else if (state === "free") finishSession("free");
+    },
+    // test hook
+    state,
+    brushUp: { ...brushUp },
+    pen: { left: { down: penS.left.down, reach: +penS.left.reach.toFixed(3), dn: +penS.left.dn.toFixed(3), up: +penS.left.up.toFixed(3), lo: +penS.left.lo.toFixed(3), hi: +penS.left.hi.toFixed(3), r: penS.left.e }, right: { down: penS.right.down, reach: +penS.right.reach.toFixed(3), dn: +penS.right.dn.toFixed(3), up: +penS.right.up.toFixed(3), lo: +penS.right.lo.toFixed(3), hi: +penS.right.hi.toFixed(3), r: penS.right.e } },
+    nStrokes: strokes.length,
+    undoClear: !!undoClear,
+    size: sizeI,
+    erase: { left: brush.left.erase, right: brush.right.erase },
+    sats: { left: brush.left.sat, right: brush.right.sat },
+    musicOff: !!BodyMovin.musicOff,
+    swatches: SWATCHES.length,
+    score: totalScore,
+    shapesDone,
+    accs,
+    tol,
+    strokes: strokeLen,
+    notes: noteCount,
+    constellations: constellations.length,
+    stamps,
+    endInfo,
+    lastSave: window.__lastSave || null,
+    wiping: !!wipe,
+    countdown: !!countdown,
+    brushes: { left: brush.left.base, right: brush.right.base },
+    best: BodyMovin.best(GAME),
+    shape: shape ? { name: shape.def.name, pts: shape.pts, lit: shape.lit.reduce((a, b) => a + b, 0), n: shape.lit.length, celebrating: !!celebrate } : null,
+    timeLeft: state === "challenge" ? Math.max(0, ROUND - (t - roundT0)) : null,
+    buttons: buttons.map((b) => ({ id: b.id, x: (b.x + b.w / 2) / W, y: (b.y + b.h / 2) / H, fill: b.fill || 0, r: [b.x / DPR, b.y / DPR, b.w / DPR, b.h / DPR] }))
+  };
+  requestAnimationFrame(frame);
+}
+function drawPainting(now) {
+  homeButton();
+  sidePanels(now);
+  {
+    const L = TL || toolLayout();
+    BodyMovin.noticeTop = (L.palBottom + Math.max(6, L.hand * 0.08) + (state === "challenge" ? L.hand * 0.6 + SYS().Hh : 0)) / innerHeight;
+  }
+  const t = now / 1e3;
+  if (countdown) {
+    const el = (now - countdown.t0) / 1e3, n = 3 - Math.floor(el / 0.8);
+    if (n !== countdown.n && n > 0) {
+      countdown.n = n;
+      SFX.tick();
+    }
+    if (n <= 0) {
+      countdown = null;
+      stamp(now);
+    } else {
+      glowText(String(n), W / 2, H * 0.45, U * 0.28 * (1 + 0.2 * Math.exp(-(el % 0.8 * 6))), "#ffe08a");
+      glowText("Strike a pose!", W / 2, H * 0.66, Math.max(PX(18), U * 0.06), "#fff2c4", { weight: 700 });
+    }
+  }
+  if (state === "challenge" && shape) {
+    const left = Math.max(0, ROUND - (t - roundT0));
+    topPill("".concat(Math.floor(left / 60), ":").concat(String(Math.floor(left % 60)).padStart(2, "0"), "   ·   ").concat(totalScore.toLocaleString()));
+    if (t - shapeT0 < 3 && !celebrate && !toasts.length && !countdown) promptLine("Trace the dots to light the stars", 50, Math.min(1, 3 - (t - shapeT0)));
+  } else if (state === "free" && strokeLen < 0.3 && constellations.length === 0 && !toasts.length && !countdown) {
+    promptLine("Push your hand toward the screen to paint", null, 0.9);
+  }
+}
+function drawTitleLight(now) {
+  const t = (now - titleT0) / 1e3;
+  const demo = (k, ph) => [W * (0.5 + 0.3 * Math.sin(k * 1.3 + ph)), H * (0.5 + 0.12 * Math.sin(k * 2.1 + ph * 2))];
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.lineCap = "round";
+  for (const [ph, hue] of [[0, 320], [2.2, 190]]) for (const [mul, l, a] of [[3, 60, 0.06], [1, 65, 0.3], [0.3, 92, 0.6]]) {
+    ctx.strokeStyle = hsl(hue + t * 20, 100, l, a);
+    ctx.lineWidth = U * 0.012 * mul;
+    ctx.beginPath();
+    for (let i = 0; i <= 50; i++) {
+      const [x, y] = demo(t - 1.6 + i * 0.032, ph);
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+function drawTitle(now) {
+  const mn = U, gap = Math.max(0.08 * W, 0.13 * mn), sw = Math.min(0.42 * mn, W * 0.8), sh = 0.16 * mn, cw = Math.min(0.26 * mn, W * 0.6), chh = 0.13 * mn;
+  if (W > H) {
+    const cy = 0.72 * H, x0 = W / 2 - (sw + gap + cw) / 2;
+    button("paint", "START", x0, cy - sh / 2, sw, sh, startFree, { primary: true, pill: true });
+    button("challenge", "CHALLENGE", x0 + sw + gap, cy - chh / 2, cw, chh, startChallenge, { pill: true });
+  } else {
+    const y = 0.64 * H - sh / 2;
+    button("paint", "START", W / 2 - sw / 2, y, sw, sh, startFree, { primary: true, pill: true });
+    button("challenge", "CHALLENGE", W / 2 - cw / 2, y + sh + gap, cw, chh, startChallenge, { pill: true });
+  }
+  homeButton();
+  if (!focusId || !buttons.some((b) => b.id === focusId)) focusId = "paint";
+  if (titleAuto && now - titleT0 > 2e3) {
+    titleAuto = false;
+    startFree();
+  }
+}
+function drawEnd(now) {
+  const e = endInfo, ch = e.mode === "challenge";
+  if (ch) {
+    glowText(e.newBest ? "NEW BEST!" : "CHALLENGE COMPLETE", W / 2, H * 0.2, Math.max(PX(22), U * 0.07), e.newBest ? "#ffe08a" : "#cfe0ff", { spacing: 0.06 });
+    glowText(totalScore.toLocaleString(), W / 2, H * 0.36, U * 0.16 * (1 + 0.25 * Math.exp(-(now - e.t0) / 200)), "#ffffff");
+  } else glowText("BEAUTIFUL!", W / 2, H * 0.32, Math.min(U * 0.11, W * 0.11), "#cfe0ff", { weight: 300, spacing: 0.14 });
+  const L = BodyMovin.layout.end(W, H), A = L.again, Hm = L.home;
+  button("again", ch ? "PLAY AGAIN" : "NEW PAINTING", A.x, A.y, A.w, A.h, ch ? startChallenge : newPainting, { primary: true, pill: true });
+  button("home2", "HOME", Hm.x, Hm.y, Hm.w, Hm.h, goHome, { pill: true, ms: BodyMovin.LEAVE_MS });
+  if (!ch) {
+    const sw = Math.min(0.24 * U, W * 0.3), sh = Math.max(Hm.h, 0.12 * U), gap = BodyMovin.layout.gap(W, H);
+    if (W > H && A.x + A.w + gap + sw <= W - PX(SYS().L)) button("save", "SAVE", A.x + A.w + gap, A.y + (A.h - sh) / 2, sw, sh, saveImage, { ms: 900, icon: "💾" });
+    else button("save", "SAVE", W - PX(SYS().L) - Math.max(0.05 * W, 0.03 * U) - sw, Hm.y + Hm.h - sh, sw, sh, saveImage, { ms: 900, icon: "💾" });
+  }
+  if (!focusId || !buttons.some((b) => b.id === focusId)) focusId = "again";
+}
+function newPainting() {
+  startFree();
+  clearSky();
+}
+size();
+addEventListener("resize", size);
+BodyMovin.start();
+requestAnimationFrame(frame);
+</script>
+<script type="module" src="_lg/painter-0.js"></script>
+</body>
+</html>

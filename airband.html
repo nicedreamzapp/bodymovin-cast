@@ -1,0 +1,140 @@
+<!doctype html>
+<html>
+<head>
+<script src="_lg/polyfills.js"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Air Band Live · Body Movin'</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #04020a; overflow: hidden; font-family: -apple-system, system-ui, "Segoe UI", sans-serif; color: #fff; user-select: none; }
+  #gl { display: block; position: fixed; top:0;right:0;bottom:0;left:0; width: 100%; height: 100%; }
+  #hud { position: fixed; top:0;right:0;bottom:0;left:0; pointer-events: none; z-index: 3; }
+  .hide { display: none !important; }
+  #loading { position: fixed; top:0;right:0;bottom:0;left:0; z-index: 20; background: #04020a; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 2vmin; font-weight: 900; letter-spacing: .3em; font-size: 3vmin; color: rgba(255,255,255,.7); }
+  #loading .bar { width: 30vmin; height: .6vmin; border-radius: 1vmin; background: rgba(255,255,255,.1); overflow: hidden; }
+  #loading .bar i { display: block; height: 100%; width: 30%; background: linear-gradient(90deg,#ff3c6e,#ffc23c); animation: ld 1s infinite ease-in-out alternate; }
+  @keyframes ld { from { margin-left: 0 } to { margin-left: 70% } }
+
+  .screen { position: fixed; top:0;right:0;bottom:0;left:0; z-index: 5; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; box-sizing: border-box;
+            background: none; }   /* 10/23 Matt: nothing dims the screen; the live stage stays fully bright */
+  /* UI spec 10/19: below the top-left system row, and the bottom ~15% kept clear for the engine's "raise both hands" line */
+  #title { padding: calc(max(1.6vmin,env(safe-area-inset-top)) + max(60px,8vmin) + max(8px,1.2vmin)) 2vmin 15vh; gap: 2vmin; }
+  #title .bph-wrap { margin: 0 auto !important; }
+  .logo { font-size: 10.5vmin; font-weight: 900; font-style: italic; letter-spacing: .02em; line-height: .95;
+          background: linear-gradient(180deg, #fff 8%, #ffd36b 45%, #ff3c6e 92%); -webkit-background-clip: text; background-clip: text; color: transparent;
+          filter: drop-shadow(0 0 2.4vmin rgba(255,60,110,.6)) drop-shadow(0 .5vmin 0 rgba(60,0,30,.9)); }
+  .logo span { background: linear-gradient(180deg, #fff 10%, #9ff7ff 50%, #3c8cff 95%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .tag { font-size: 2.3vmin; font-weight: 800; letter-spacing: .38em; color: rgba(255,255,255,.85); margin: 1.2vmin 0 2.6vmin; text-shadow: 0 0 2vmin #000; }
+  /* phones: the live camera sits at the right edge in the middle, so the card goes to the top and the choices + START
+     to the bottom (above the engine's prompt line); the end screen sits above the camera */
+  @media (max-width: 600px) {
+    #title { justify-content: flex-start; }
+    #startRow { margin-top: auto; }
+    #end { justify-content: flex-start; padding-top: calc(max(1.6vmin,env(safe-area-inset-top)) + max(60px,8vmin) + 6vmin); }
+  }
+  .btn::after { content: ''; position: absolute; left: 0; bottom: 0; height: .7vmin; width: calc(var(--fill, 0) * 100%); background: linear-gradient(90deg,#ff3c6e,#ffc23c); }
+  .btn { position: relative; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; pointer-events: auto;
+         padding: 2.8vmin 7vmin; border-radius: 99px; font-weight: 900; letter-spacing: .16em; font-size: 4vmin; color: #fff;
+         background: linear-gradient(90deg, rgba(255,60,110,.45), rgba(255,194,60,.4)); border: 2px solid rgba(255,255,255,.75);
+         box-shadow: 0 0 3vmin rgba(255,60,110,.4); text-shadow: 0 .2vmin .6vmin rgba(0,0,0,.6); min-height: 80px; min-width: 180px; }
+  .btn.over { transform: scale(1.05); }
+  .btn.ghost { background: rgba(10,6,22,.55); border-color: rgba(255,255,255,.4); box-shadow: none; }
+  .btn.small { font-size: 2.4vmin; padding: 1.6vmin 3.2vmin; min-height: 60px; min-width: 140px; }
+  .btn.start { font-size: max(20px,4vmin); padding: 0 8vmin; height: max(60px,9vmin); }
+  /* system row: HOME, then body.js's MENU, music and pause in ONE #bp-sys row; its look and 60 px size come from body.js */
+  #home { box-shadow: none; }
+  #home.over { border-color: #ffc23c !important; }
+  /* START SCREEN (BODY-UI-PLAN fix 6): how-to card + ONE big START (the last song and part) + one smaller "change" beside
+     it, a hand of empty space between; the genre -> song -> part questions are BodyMovin.pick screens, one at a time */
+  .startrow { display: flex; align-items: center; justify-content: center; gap: max(8vw, 13vmin); }
+  @media (max-aspect-ratio: 1/1) { .startrow { flex-direction: column; gap: max(40px, 6vh); } }
+  #startBtn { height: auto; min-width: max(240px, 40vmin); min-height: max(80px, 16vmin); font-size: max(22px, 5vmin); padding: 0 6vmin; box-sizing: border-box; }
+  #chgBtn { flex-direction: column; gap: .5vmin; min-width: max(150px, 24vmin); max-width: max(220px, 40vmin); min-height: max(66px, 12vmin); padding: 1vmin 3vmin; box-sizing: border-box;
+            font-size: max(15px, 2.6vmin); letter-spacing: .1em; text-align: center; }
+  #chgBtn .sub { font-size: max(12px, 1.8vmin); font-weight: 700; letter-spacing: .06em; opacity: .8; }
+  #banner { position: fixed; left: 0; right: 0; top: 24%; text-align: center; z-index: 4; pointer-events: none; opacity: 0; }
+  #banner .big { font-size: 12vmin; font-weight: 900; font-style: italic; line-height: 1;
+                 background: linear-gradient(180deg, #fff 10%, #ffe27a 45%, #ff3c6e 90%); -webkit-background-clip: text; background-clip: text; color: transparent;
+                 filter: drop-shadow(0 0 2.2vmin rgba(255,60,110,.75)) drop-shadow(0 .6vmin 0 rgba(60,0,30,.9)); }
+  #banner .big.gold { background: linear-gradient(180deg, #fff 10%, #fff0a0 40%, #ffb020 90%); -webkit-background-clip: text; background-clip: text; filter: drop-shadow(0 0 2.6vmin rgba(255,190,40,.9)) drop-shadow(0 .6vmin 0 rgba(80,40,0,.9)); }
+  #banner .small { font-size: 3.2vmin; font-weight: 800; letter-spacing: .2em; margin-top: 1vmin; color: #fff; text-shadow: 0 0 2vmin rgba(0,0,0,.9), 0 0 1vmin rgba(255,60,110,.9); }
+  #banner.on { animation: pop 2s cubic-bezier(.2,1.4,.4,1) forwards; }
+  /* call-outs sit off to the right over the empty seats, never over the stage or the note lane (Matt 10/30: "right where the action is") */
+  #banner { top: 32%; left: auto; right: 2.5vw; max-width: max(22vw, 34vmin); text-align: right; transform-origin: right center; }
+  #banner .big { font-size: min(5.2vmin, 4.2vw); line-height: 1.1; white-space: normal; padding: 0 .14em; }
+  #banner .small { font-size: min(2.4vmin, 2vw); letter-spacing: .08em; }
+  @keyframes pop { 0% { opacity: 0; transform: scale(.4) rotate(-4deg); } 12% { opacity: 1; transform: scale(1.08) rotate(1deg); } 20% { transform: scale(1); }
+                   80% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(1.06) translateY(-3vmin); } }
+  #end .elabel { font-size: max(16px,3vmin); font-weight: 800; letter-spacing: .3em; color: rgba(255,255,255,.75); }
+  #end .score { font-size: max(56px,16vmin); font-weight: 900; line-height: 1.05; font-variant-numeric: tabular-nums; margin-bottom: 4vmin;
+                background: linear-gradient(180deg,#fff 10%,#ffd36b 50%,#ff3c6e 95%); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 0 2vmin rgba(255,60,110,.5)); }
+  /* END SCREEN (BODY-UI-PLAN rule 4): PLAY AGAIN big, just right of centre; NEXT SONG smaller to its left, a hand of
+     space between; HOME small at the far bottom-left (class bp-leave, 1.4 s hold). The whole screen sits a little high
+     (padding-bottom) so the buttons keep a hand of space above HOME. Upright phone: stacked, PLAY AGAIN on top. */
+  #end { padding-bottom: 14vh; }
+  .btnrow { display: flex; gap: max(8vw, 13vmin); align-items: center; justify-content: center; max-width: 94vw; }
+  @media (max-aspect-ratio: 1/1) { .btnrow { flex-direction: column-reverse; gap: max(40px, 6vh); } }
+  .btnrow .btn { font-size: max(18px,3.6vmin); padding: 0 5.5vmin; height: auto; min-height: max(66px,12vmin); box-sizing: border-box; }
+  .btnrow #againBtn { font-size: max(22px,5vmin); min-width: max(240px,40vmin); min-height: max(80px,16vmin); }
+</style>
+<style id="ui-nodim">html:has(#end:not(.hide)) #home{display:none!important}   /* end screen: ONE HOME (bottom-left) */</style>
+<style id="ui-phone-scores">@media (max-width:600px){html:has(.bphs-wrap) #bp-cam{visibility:hidden}}</style><!-- phone: the high-score card is nearly full width, so the live camera steps away while it is up -->
+
+</head>
+<body>
+<canvas id="gl"></canvas>
+<canvas id="hud"></canvas>
+<div id="loading"><div>SOUND CHECK</div><div class="bar"><i></i></div></div>
+<div id="banner"><div class="big"></div><div class="small"></div></div>
+<div id="home" class="btn" data-act="home">← HOME</div>
+<div id="bp-sys" data-home="home"></div>
+<script>(function() {
+  const row = document.getElementById("bp-sys");
+  const adopt = () => {
+    const home = document.getElementById(row.dataset.home), menu = document.getElementById("bp-menu"), mus = document.getElementById("bp-music"), pz = document.getElementById("bp-pause");
+    for (const e of [home, menu, mus]) if (e && e.parentElement !== row) row.appendChild(e);
+    if (home && row.firstChild !== home) row.insertBefore(home, row.firstChild);
+    if (menu && mus && menu.nextSibling !== mus) row.insertBefore(mus, menu.nextSibling);
+    if (pz && pz.parentElement === row && row.lastElementChild !== pz) row.appendChild(pz);
+  };
+  new MutationObserver(adopt).observe(document.body, { childList: true });
+  new MutationObserver(adopt).observe(row, { childList: true });
+  addEventListener("DOMContentLoaded", adopt);
+  setTimeout(adopt, 0);
+})();
+</script>
+
+<div id="title" class="screen hide">
+  <div class="startrow" id="startRow"><div class="btn start" id="startBtn" data-act="start" data-ms="900">START</div>
+    <div class="btn ghost" id="chgBtn" data-act="change" data-ms="900"><span id="chgLbl">GUITAR · ROCK</span><span class="sub" id="chgSub">change</span></div></div>
+</div>
+
+<div id="end" class="screen hide">
+  <div class="elabel">SCORE</div>
+  <div class="score" id="eScore">0</div>
+  <div class="btnrow"><div class="btn ghost" id="encoreBtn" data-act="encore">NEXT SONG</div><div class="btn" id="againBtn" data-act="again" data-ms="900">PLAY AGAIN</div><div class="btn ghost bp-leave" id="endHome" data-act="home" data-dwell="b-endhome" data-ms="1400">HOME</div></div>
+</div>
+
+<script src="body.js"></script>
+<script src="howto.js"></script>
+<script src="scores.js"></script>
+<script>window.airbandHowTo = (inst) => BodyMovin.howTo({
+  title: "AIR BAND LIVE",
+  mount: "#title",
+  before: "#startRow",
+  compact: true,
+  corner: false,
+  moves: {
+    guitar: [{ anim: "point", text: "Left arm high, middle or low picks the color" }, { anim: "swipe", text: "Strum your right hand at your hip as the orb lands" }],
+    drums: [{ anim: "whack", text: "Chop down on the drums like real sticks" }, { anim: "jump", text: "Jump for the big crash" }],
+    vocals: [{ anim: "reach", text: "Put your hands in the rings as the orbs land" }]
+  }[inst] || []
+});
+</script>
+<script>BodyMovin.selfView = { x: 0.5, y: 0.97, h: 0.5 };
+BodyMovin.realSelf = { view: "mirror", outfit: "casual", ghost: "ready" };
+BodyMovin.figure = { torso: 0.36, chestY: 0.42, armGain: 1, frameReach: false, drawReach: true, alpha: 0.3, limb: 1.35 };
+</script>
+<script type="module" src="_lg/airband-0.js"></script>
+</body>
+</html>

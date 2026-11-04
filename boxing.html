@@ -1,0 +1,187 @@
+<!doctype html>
+<html>
+<head>
+<script src="_lg/polyfills.js"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Bop Boxing · Body Movin'</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #120c0c; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
+  #gl canvas { display: block; position: fixed; top:0;right:0;bottom:0;left:0; width: 100vw; height: 100vh; }
+  #c { display: block; position: fixed; top:0;right:0;bottom:0;left:0; width: 100vw; height: 100vh; z-index: 2; }
+  /* the live picture keeps the right edge on a TV; on an upright phone screen it sits bottom-right */
+  #livecam { position: fixed; right: 2vmin; top: 50%; transform: translateY(-50%); width: 22vmin; z-index: 7; display: none; pointer-events: none; }
+  @media (orientation: portrait) { #livecam { top: auto; bottom: 1.4vmin; transform: none; } }
+</style>
+
+</head>
+<body>
+<div id="gl"></div>
+<canvas id="c"></canvas>
+<!-- FEEL for boxing (10/21 rebuild): the picture joints follow faster (One Euro min cutoff 3.0) and lead a little more
+     (55 ms) to hide the phone-to-TV delay; read by body.js FEEL at load, nothing changed in body.js -->
+<script>window.BP_TUNE = { imgMin: 3, predictMs: 55 };
+</script>
+<script src="body.js"></script>
+<script src="howto.js"></script>
+<script src="scores.js"></script>
+<script src="tips.js"></script>
+<!-- UI_SPEC 10/19 (group A): ONE top-left system row: HOME, then body.js's MENU and music buttons, same size, same glass.
+     The game's own HOME element (id given in data-home) is moved in first; MENU and music are adopted as body.js creates
+     them. BPUI.top(...) gives every game the same top-centre / top-right slots, kept clear of this row at any window size. -->
+<style>
+  #bp-sys { position: fixed; z-index: 31; top: max(1.6vmin, env(safe-area-inset-top)); left: max(1.6vmin, env(safe-area-inset-left)); display: flex; gap: max(8px, 1.2vmin); align-items: center; pointer-events: none; }
+  #bp-sys > * { position: relative !important; top:auto!important;right:auto!important;bottom:auto!important;left:auto!important; margin: 0 !important; transform: none !important; box-sizing: border-box !important; flex: none;
+    height: max(60px, 8vmin) !important; min-height: 0 !important; min-width: 0 !important; width: auto !important; padding: 0 max(16px, 2.4vmin) !important; border-radius: 999px !important;
+    border: 1px solid rgba(255,255,255,.18) !important; background: rgba(10,12,24,.55) !important; color: #fff !important; text-shadow: none !important;
+    font: 800 max(16px, 2.2vmin)/1 -apple-system, system-ui, "Segoe UI", sans-serif !important; letter-spacing: .08em !important; white-space: nowrap;
+    display: inline-flex !important; align-items: center; justify-content: center; opacity: 1 !important; cursor: pointer; pointer-events: auto; text-decoration: none !important;
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); overflow: hidden; }
+  #bp-sys > #bp-music { width: max(60px, 8vmin) !important; padding: 0 !important; }
+  #bp-sys > .sys-hide, #bp-sys > .hide { display: none !important; }
+</style>
+<div id="bp-sys"></div>
+<script>(function() {
+  const row = document.getElementById("bp-sys");
+  const adopt = () => {
+    const home = document.getElementById(row.dataset.home || "bp-home"), menu = document.getElementById("bp-menu"), mus = document.getElementById("bp-music");
+    for (const e of [home, menu, mus]) if (e && e.parentElement !== row) row.appendChild(e);
+    if (home && row.firstChild !== home) row.insertBefore(home, row.firstChild);
+    if (menu && mus && menu.nextSibling !== mus) row.insertBefore(mus, menu.nextSibling);
+  };
+  new MutationObserver(adopt).observe(document.body, { childList: true });
+  if (window.BodyMovin && BodyMovin.camStyle === void 0 && innerWidth < innerHeight) BodyMovin.camStyle = "top:auto;bottom:max(1.4vmin,env(safe-area-inset-bottom));transform:none";
+  addEventListener("DOMContentLoaded", adopt);
+  setTimeout(adopt, 0);
+  window.BPUI = {
+    homeButton(go) {
+      const a = document.createElement("a");
+      a.id = "bp-home";
+      a.href = "index.html";
+      a.textContent = "← HOME";
+      a.setAttribute("aria-label", "Body Movin' home");
+      a.addEventListener("click", (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        (go || (() => {
+          location.href = "index.html";
+        }))();
+      });
+      a.addEventListener("pointerdown", (e) => e.stopPropagation());
+      row.insertBefore(a, row.firstChild);
+      (function loop(now) {
+        requestAnimationFrame(loop);
+        const BP = window.BodyMovin;
+        if (!BP || !BP.handOver || !BP.dwell || a.offsetParent === null) return;
+        const r = a.getBoundingClientRect(), over = BP.handOver({ x: r.left, y: r.top, w: r.width, h: r.height }, innerWidth, innerHeight);
+        const k = BP.dwell("bp-home", over, now, 1200);
+        a.style.boxShadow = over ? "inset " + Math.round((k || 0) * r.width) + "px 0 0 #66e0ff55" : "none";
+        if (k === 1) (go || (() => {
+          location.href = "index.html";
+        }))();
+      })(performance.now());
+      return a;
+    },
+    // the system row's box in CSS px (empty row: a zero box at its corner)
+    sys() {
+      const r = row.getBoundingClientRect();
+      return r.width ? r : { left: r.left, top: r.top, right: r.left, bottom: r.top + Math.max(36, Math.min(innerWidth, innerHeight) * 0.054), width: 0, height: 0 };
+    },
+    // the standard top slots: a centre pill (cw x ch) and an optional top-right item (rw x rh), CSS px.
+    // The centre pill stays centred unless that would touch the system row or the right item; then it slides,
+    // and if there is still no room (narrow phone) it drops just below the system row.
+    top(cw, ch, rw = 0, rh = 0) {
+      const W = innerWidth, H = innerHeight, vmin = Math.min(W, H) / 100, s = this.sys(), m = s.top, gap = Math.max(8, 1.2 * vmin);
+      const mb = document.getElementById("bp-music"), mr = mb && document.documentElement.dataset.bpMode === "play" ? mb.getBoundingClientRect() : null;
+      const edge = mr && mr.width ? mr.left - gap : W - Math.max(m, s.left);
+      const r = { x: edge - rw, y: m };
+      let x = W / 2 - cw / 2, y = m;
+      const lo = s.right + gap, hi = rw ? r.x - gap : edge;
+      if (x < lo) x = lo;
+      if (x + cw > hi) x = hi - cw;
+      if (x < lo) {
+        x = Math.max(gap, W / 2 - cw / 2);
+        y = Math.max(s.bottom, rw ? r.y + rh : 0) + gap;
+      }
+      return { c: { x, y, w: cw, h: ch }, r: { x: r.x, y: r.y, w: rw, h: rh }, bottom: Math.max(y + ch, rw ? r.y + rh : 0, s.bottom) };
+    },
+    // where the live camera view is (or would be, once the phone sends its picture): games keep their HUD out of it
+    camZone() {
+      for (const id of ["bp-cam", "livecam"]) {
+        const cam = document.getElementById(id);
+        if (cam && cam.offsetParent !== null) {
+          const c = cam.getBoundingClientRect();
+          if (c.width) return c;
+        }
+      }
+      const W = innerWidth, H = innerHeight, vmin = Math.min(W, H) / 100, w = Math.max((this.camVmin || 15) * vmin, 90), h = w * 16 / 9 + Math.max(14, 2.2 * vmin), m = 1.4 * vmin;
+      const top = W < H ? H - m - h : H / 2 - h / 2;
+      return { left: W - m - w, right: W - m, top, bottom: top + h, width: w, height: h };
+    },
+    // body.js's own "Raise both hands to start" check-in card (shown until a phone player has checked in): its box, or null.
+    // Start screens keep their START above the bottom 13% for it; HUD keeps clear of it during play.
+    coachZone() {
+      const BP = window.BodyMovin;
+      if (!BP || BP.ready || !BP.live || BP.mouse || BP.simulating) return null;
+      const W = innerWidth, H = innerHeight, fs = Math.max(16, H * 0.034), cy = BP.howTo && BP.howTo.visible ? H * 0.93 : H * 0.16, w = Math.max(fs * 10, fs * 13.5) + fs * 4.2;
+      return { left: W / 2 - w / 2 - fs, right: W / 2 + w / 2 + fs, top: cy - fs * 1.4, bottom: cy + fs * 1.7, width: w + 2 * fs, height: fs * 3.1 };
+    },
+    // the one bottom-centre prompt (w x h, CSS px): its top-left corner, lifted above the live camera view if they would touch
+    bottom(w, h) {
+      const W = innerWidth, H = innerHeight, vmin = Math.min(W, H) / 100, gap = Math.max(8, 1.2 * vmin), x = W / 2 - w / 2;
+      let y = H - h - Math.max(10, 3 * vmin);
+      const c = this.camZone();
+      if (x + w > c.left - gap && x < c.right + gap && y + h > c.top - gap && y < c.bottom + gap) y = c.top - gap - h;
+      return { x, y };
+    }
+  };
+})();
+</script>
+<script>BPUI.camVmin = 22;
+BPUI.homeButton();
+const boxHowTo = (top) => BodyMovin.howTo({
+  title: "BOP BOXING",
+  top,
+  bottom: 0.6,
+  corner: false,
+  side: "left",
+  width: 0.4,
+  // wide screens: a column, the bag stays in view (10/23)
+  moves: [{ anim: "punch", text: "Jab, cross and hook the bag" }, { anim: "kick", text: "Big bag: lift your foot and kick it" }],
+  you: "Raise a hand and hold it on START"
+});
+boxHowTo(0.03);
+function boxHowToClear() {
+  const sys = document.getElementById("bp-sys"), card = document.querySelector(".bph-card");
+  if (!sys || !card || window.__boxPick || window.__game && __game.state !== "title") return;
+  const a = sys.getBoundingClientRect(), b = card.getBoundingClientRect(), top = Math.min(0.2, (a.bottom + 10) / innerHeight);
+  if (a.width && b.width && b.left < a.right + 8 && b.top < a.bottom + 8) boxHowTo(top);
+}
+setTimeout(boxHowToClear, 700);
+setTimeout(boxHowToClear, 2e3);
+addEventListener("resize", () => {
+  clearTimeout(boxHowToClear.t);
+  boxHowToClear.t = setTimeout(() => {
+    boxHowTo(0.03);
+    setTimeout(boxHowToClear, 50);
+  }, 250);
+});
+</script>
+<script>BodyMovin.needs = "full";
+BodyMovin.selfView = null;
+BodyMovin.wantVideo = true;
+</script>
+<div id="livecam">
+  <video id="livevid" autoplay playsinline muted style="width:100%;border-radius:2.2vmin;transform:scaleX(-1);border:2px solid rgba(255,255,255,.35);box-shadow:0 1vmin 4vmin rgba(0,0,0,.6);background:#000;display:block"></video>
+  <div style="margin-top:.8vmin;font:700 max(11px,1.5vmin) -apple-system,system-ui,sans-serif;color:rgba(255,255,255,.75);text-align:center;text-shadow:0 0 1vmin #000">live from your phone · never recorded</div>
+</div>
+<script>BodyMovin.on("video", (s) => {
+  const v = document.getElementById("livevid");
+  v.srcObject = s;
+  v.play && v.play().catch(() => {
+  });
+});
+</script>
+<script type="module" src="_lg/boxing-0.js"></script>
+</body>
+</html>
