@@ -994,14 +994,17 @@ import "./chunk-NWIHTO7D.js";
     c.restore();
     padFrom(B2, side, dx, -dy);
   }
+  const PHONE_REACH = window.BP_PHONEUI ? 0.22 : 0;
   function padFrom(B2, side, dwx, dwy) {
     const Bt = B2.t, hw = B2[side + "P"], g = fig.glove(side);
+    const bx = fig.plane ? fig.plane.position.x : 0, out = Math.abs(hw[0] - bx), ext = PHONE_REACH * MathUtils.clamp((out - 0.18) / 0.32, 0, 1);
     padPrev = pad;
     pad = {
       key: BodyMovin.imgAt,
       at: performance.now(),
       side,
-      c: [hw[0] + dwx * PAD.reach * Bt, hw[1] + dwy * PAD.reach * Bt],
+      ext,
+      c: [hw[0] + dwx * (PAD.reach * Bt + ext), hw[1] + dwy * (PAD.reach * Bt + ext)],
       r: PAD.blade * Bt,
       h: hw.slice(),
       hr: PAD.hand * Bt,
@@ -1012,6 +1015,7 @@ import "./chunk-NWIHTO7D.js";
       pose: B2
     };
   }
+  const SLACK = () => window.BP_PHONEUI ? 0.045 : PAD.slack;
   function onPlane(p) {
     const c = camera.position, k = (FIG_Z - c.z) / Math.min(-1e-3, p.z - c.z);
     return { x: c.x + (p.x - c.x) * k, y: c.y + (p.y - c.y) * k, r: BALL_R * BALL_VIS * k };
@@ -1031,13 +1035,13 @@ import "./chunk-NWIHTO7D.js";
   function contactNow(serve) {
     if (!padFresh() || !atDepth(pad, B.p.z)) return null;
     const q = onPlane(B.p), gap = padGap(pad, q);
-    return gap < PAD.slack ? { P: pad, q, gap, swept: false, serve } : null;
+    return gap < SLACK() ? { P: pad, q, gap, swept: false, serve } : null;
   }
   function contactSwept() {
     if (!padFresh() || !padPrev || pad.at - padPrev.at > 350 || !atDepth(pad, B.p.z)) return null;
     const q = onPlane(B.p);
     const d = Math.min(segD(q.x, q.y, padPrev.c, pad.c) - Math.min(pad.r, padPrev.r), segD(q.x, q.y, padPrev.h, pad.h) - pad.hr) - q.r;
-    return d < PAD.slack ? { P: pad, q, gap: d, swept: true } : null;
+    return d < SLACK() ? { P: pad, q, gap: d, swept: true } : null;
   }
   function insideBody(q) {
     const P2 = pad && pad.pose;
@@ -1116,7 +1120,7 @@ import "./chunk-NWIHTO7D.js";
     S.serves++;
     const deuce = S.me >= 10 && S.opp >= 10;
     if (deuce || S.serves >= 2) {
-      S.server = other(S.server);
+      S.server = window.BP_PHONEUI ? "opp" : other(S.server);
       S.serves = 0;
     }
     const won = (S.me >= 11 || S.opp >= 11) && Math.abs(S.me - S.opp) >= 2;
@@ -1183,7 +1187,8 @@ import "./chunk-NWIHTO7D.js";
     const L = LEVELS[level];
     const speed = L.aiPace[0] + Math.random() * (L.aiPace[1] - L.aiPace[0]);
     const away = -Math.sign(P.pos.x || 1) * (level === "easy" ? 0.15 : level === "normal" ? 0.35 : 0.5);
-    const tx = MathUtils.clamp(away + (Math.random() - 0.5) * 0.7, -HALF_W + 0.18, HALF_W - 0.18);
+    const edge = window.BP_PHONEUI ? 0.25 : 0.18;
+    const tx = window.BP_PHONEUI && level !== "hard" ? MathUtils.clamp((Math.random() - 0.5) * 2 * (HALF_W - edge), -HALF_W + edge, HALF_W - edge) : MathUtils.clamp(away + (Math.random() - 0.5) * 0.7, -HALF_W + edge, HALF_W - edge);
     const tz = 0.55 + Math.random() * 0.6;
     B.v.copy(aim(B.p, tx, tz, speed));
     B.live = true;
@@ -1354,7 +1359,7 @@ import "./chunk-NWIHTO7D.js";
       const hf = fig.handFrame(side);
       if (hf && pad && fig.opacity > 0.05) {
         const dir = new Vector3(pad.c[0] - pad.h[0], pad.c[1] - pad.h[1], 0).normalize();
-        youPaddle.position.copy(hf.p).addScaledVector(dir, PAD.reach * pad.pose.t);
+        youPaddle.position.copy(hf.p).addScaledVector(dir, PAD.reach * pad.pose.t + (pad.ext || 0));
         youPaddle.quaternion.setFromRotationMatrix(new Matrix4().makeBasis(new Vector3().crossVectors(new Vector3(0, 0, 1), dir.clone().negate()), new Vector3(0, 0, 1), dir.clone().negate()));
         youPaddle.visible = src === "iphone" && !window.__bot;
       } else youPaddle.visible = false;
@@ -1594,10 +1599,12 @@ import "./chunk-NWIHTO7D.js";
     S.me = 0;
     S.opp = 0;
     S.over = false;
-    S.server = "me";
+    S.server = window.BP_PHONEUI ? "opp" : "me";
     S.serves = 0;
+    if (window.BP_PHONEUI) PH.picked = true;
     newPoint();
-    say("YOUR SERVE", "swing at the floating ball", 1600);
+    if (window.BP_PHONEUI) say("GET READY", "hit the ball back with your hand", 1800);
+    else say("YOUR SERVE", "swing at the floating ball", 1600);
   }
   document.getElementById("again").onclick = (e) => {
     e.stopPropagation();
@@ -1639,7 +1646,7 @@ import "./chunk-NWIHTO7D.js";
   BodyMovin.start();
   if (new URLSearchParams(location.search).has("tv")) setTimeout(() => startGame("tv"), 800);
   window.__rz = RZ;
-  window.__pp = { S, B, P, ARMR, PH, fig, BALL_VIS, CT, blocks: () => CT.blocks, drawn: () => drawnOnScreen(), myHit, setLevel, say, ended: () => ended, endMatch: () => {
+  window.__pp = { pad: () => pad, onPlane, S, B, P, ARMR, PH, fig, BALL_VIS, CT, blocks: () => CT.blocks, drawn: () => drawnOnScreen(), myHit, setLevel, say, ended: () => ended, endMatch: () => {
     Object.assign(S, { me: 10, opp: 3, phase: "rally", lastHit: "me", over: false });
     point("me", "they missed");
   }, started: () => started, src: () => src, level: () => level, phone: () => ({ body: !!body, lastBodyAt, src, now: performance.now() }) };

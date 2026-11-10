@@ -2417,6 +2417,8 @@ import "./chunk-NWIHTO7D.js";
       const o = pracTarget();
       list = o ? [o] : [];
     }
+    window.__galList = list;
+    window.__galRets = RETS;
     const assist = (G.hardcore ? 0.25 : 0.45) + 0.25 * G.struggle;
     const lockTime = G.phase === "practice" ? 0.12 : (G.hardcore ? 0.17 : 0.12) - 0.03 * G.struggle;
     const anyActive = !!(live.right || live.left) && G.state === "play";

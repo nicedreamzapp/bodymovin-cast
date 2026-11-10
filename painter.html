@@ -55,7 +55,12 @@ window.__glow = glow;
 const paint = document.createElement("canvas"), pctx = paint.getContext("2d");
 let W, H, U, DPR;
 function size() {
-  DPR = Math.min(2, devicePixelRatio || 1);
+  let phone = false;
+  try {
+    phone = sessionStorage.bp_phoneui === "1" && !/[?&]tv=1/.test(location.search);
+  } catch (_) {
+  }
+  DPR = Math.min(phone ? 1.25 : 2, devicePixelRatio || 1);
   const nw = Math.round(innerWidth * DPR), nh = Math.round(innerHeight * DPR);
   let keep = null;
   if (paintBase.width) {

@@ -100,10 +100,37 @@
   @keyframes cwd { 0%, 80%, 100% { opacity: .2; transform: scale(.7); } 40% { opacity: 1; transform: scale(1); } }
   #foot { position: fixed; bottom: calc(var(--u) * .8); right: calc(var(--u) * 3); font-size: calc(var(--u) * 1); color: #ffffff70; }
   #foot a { color: #ffffffb0; }
+  /* PHONE UI (11/04, the iPhone app's own game view): ONE list of every game you swipe through with your thumb, big
+     cards, nothing on top of them, no pages, no hand cursor, no setup card; a plain title and one "Change how I play" chip. */
+  html.bp-phone, html.bp-phone body { height: auto; min-height: 100%; overflow-x: hidden; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  html.bp-phone #wrap { position: static; display: block; padding: 14px 16px 48px; }
+  html.bp-phone header { display: none; }
+  html.bp-phone #phonebar { display: flex; }
+  #phonebar { display: none; align-items: center; justify-content: space-between; gap: 12px; max-width: 640px; margin: 0 auto 14px; }
+  #phonebar h2 { margin: 0; font: 900 32px/1.1 -apple-system, system-ui, sans-serif; }
+  #phonebar button { flex: none; min-height: 48px; padding: 0 18px; border-radius: 999px; border: 1px solid #ffffff40; background: #ffffff1a; color: #fff; font: 800 17px -apple-system, system-ui, sans-serif; }
+  html.bp-phone #bp-cam, html.bp-phone #setup, html.bp-phone #foot, html.bp-phone #castwait, html.bp-phone #bp-prompt, html.bp-phone #bp-music { display: none !important; }
+  /* HAND SCROLL (Matt 11/04: "you can't scroll the menu with my hands"): hold a hand on the top or bottom strip */
+  .bp-scroll { display: none; position: fixed; left: 0; right: 0; height: 13vh; z-index: 4; pointer-events: none; align-items: center; justify-content: center;
+    font-size: 34px; color: #ffffffd0; background: linear-gradient(var(--d), #000000b0, #00000000); transition: opacity .2s; }
+  .bp-scroll .fill { position: absolute; left: 0; bottom: 0; height: 4px; width: 0; background: #9dffd0; }
+  #scrollUp { top: 0; --d: 180deg; } #scrollDown { bottom: 0; --d: 0deg; }
+  html.bp-phone .bp-scroll { display: flex; }
+  html.bp-phone .bp-scroll.hot { color: #9dffd0; }
+  html.bp-phone #grid { display: flex; flex-direction: column; gap: 16px; max-width: 640px; margin: 0 auto; }
+  html.bp-phone #grid > .pg-off { display: flex !important; }
+  html.bp-phone #grid > .tile.nav, html.bp-phone #grid > #beta, html.bp-hosted #grid > #beta { display: none !important; }
+  html.bp-phone .tile { aspect-ratio: 16 / 9; min-height: 0; border-radius: 24px; padding: 16px 18px; justify-content: flex-end; align-items: flex-start; text-align: left; transform: none !important; }
+  html.bp-phone .tile .nm { font-size: 30px; max-width: 100%; transform: none !important; }
+  html.bp-phone .tile .ds { font-size: 18px; max-width: 100%; }
+  html.bp-phone .tile .tag, html.bp-phone .tile .best, html.bp-phone .tile .ic, html.bp-phone .tile .shine { display: none !important; }
+  html.bp-phone .tile .fill { height: 10px; background: #9dffd0; }
+  html.bp-phone .tile:hover .pic, html.bp-phone .tile.hot .pic { transform: none; }
 </style>
 </head>
 <body>
 <div id="wrap">
+  <div id="phonebar"><h2>Pick a game</h2><button id="changePlay" aria-label="Change how I play">Change how I play</button></div>
   <header>
     <div class="brand"><h1>BODY <b>MOVIN'</b></h1></div>
     <div id="conn"><canvas id="qr" width="300" height="300"></canvas><div class="t" id="connt">connecting…</div><div id="bp-cam-slot"></div></div>
@@ -138,7 +165,7 @@
   <defs><marker id="a" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#ffd36b"/></marker></defs>
   <rect x="270" y="202" width="104" height="24" rx="12" fill="#0b0918"/><text x="322" y="219" fill="#ffd36b" font-size="15" font-weight="800" text-anchor="middle">6 to 8 feet</text>
 </svg>
-  <div class="sl"><b>1</b> Scan the code above with any phone · <b>2</b> Stand it <b>upright</b> in front of the TV, camera facing you · <b>3</b> Step back until the phone sees you head to feet · <b>4</b> Raise both hands</div>
+  <div class="sl" id="setupSteps"><b>1</b> Scan the code above with any phone · <b>2</b> Stand it <b>upright</b> in front of the TV, camera facing you · <b>3</b> Step back until the phone sees you head to feet · <b>4</b> Raise both hands</div>
   <div class="sp"><svg class="seal" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" role="img" aria-label="Privacy guarantee: kept local, you're in control">
   <defs>
     <linearGradient id="sealg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#9dffd0"/><stop offset=".5" stop-color="#66e0ff"/><stop offset="1" stop-color="#ff7ad9"/></linearGradient>
@@ -158,7 +185,17 @@
 </svg><div><b>Our privacy guarantee: kept local, you're in control.</b> Your camera picture stays on your phone. We don't record, save or keep anything about you, and nothing is ever used for training. No sign up. Scores stay on this screen.</div></div>
   <button id="setupClose">Got it</button>
 </div></div>
+<script>(function() {
+  if (location.port !== "8080") return;
+  document.documentElement.classList.add("bp-hosted");
+  var el = document.getElementById("setupSteps");
+  if (!el) return;
+  var h = location.hostname, local = h === "localhost" || h === "127.0.0.1";
+  el.innerHTML = "<b>1</b> " + (local ? "Open the address from the app in your TV's web browser" : "Open <b>" + location.host + "</b> in your TV's web browser") + " &middot; <b>2</b> Stand the phone <b>upright</b>, back camera facing you &middot; <b>3</b> Step back 6 to 8 feet &middot; <b>4</b> Raise both hands";
+})();
+</script>
 <div id="castwait" class="hide"><div class="cw"><div class="cwt">Connecting to your phone…</div><div class="dots"><span></span><span></span><span></span></div><div class="cws" id="castwaits"></div></div></div>
+<div class="bp-scroll" id="scrollUp">▲<span class="fill"></span></div><div class="bp-scroll" id="scrollDown">▼<span class="fill"></span></div>
 <canvas id="hands"></canvas>
 <div id="foot">Raise both hands, then put both hands on a game · <a id="howset" href="#">how to set up</a> · <a id="demo" href="#">watch a demo</a> · 🔒 private: nothing about you is kept</div>
 <script>(function() {
@@ -446,6 +483,7 @@ addEventListener("wheel", (e) => {
 let wheelLock = false;
 paginate();
 addEventListener("resize", paginate);
+const scrollUpEl = document.getElementById("scrollUp"), scrollDownEl = document.getElementById("scrollDown");
 const setupEl = document.getElementById("setup"), gotIt = document.getElementById("setupClose");
 function frame(now) {
   BodyMovin.update(now);
@@ -477,16 +515,36 @@ function frame(now) {
       nv.click();
     }
   }
+  let clipTop = 0, clipBot = innerHeight;
+  if (window.BP_PHONEUI && !setupUp) {
+    const maxY = document.documentElement.scrollHeight - innerHeight;
+    for (const [el, dir] of [[scrollUpEl, -1], [scrollDownEl, 1]]) {
+      const r = el.getBoundingClientRect(), can = dir < 0 ? scrollY > 2 : scrollY < maxY - 2;
+      el.style.opacity = can ? 1 : 0;
+      if (can) {
+        if (dir < 0) clipTop = r.bottom;
+        else clipBot = r.top;
+      }
+      const over = can && BodyMovin.handsOver({ x: r.left * k, y: r.top * k, w: r.width * k, h: r.height * k }, W, H) > 0;
+      if (!over) el._t = 0;
+      else if (!el._t) el._t = now;
+      const held = over ? now - el._t : 0, f = Math.min(1, held / 400);
+      el.classList.toggle("hot", over);
+      el.querySelector(".fill").style.width = "".concat(Math.round(f * 100), "%");
+      if (f === 1) scrollBy(0, dir * Math.min(12, 5 + (held - 400) / 200));
+    }
+  }
   for (const tl of tiles) {
-    if (setupUp || tl.el.classList.contains("pg-off")) {
+    if (setupUp || !window.BP_PHONEUI && tl.el.classList.contains("pg-off")) {
       tl.el.classList.remove("hot");
       tl.el.querySelector(".fill").style.width = "0%";
       continue;
     }
-    const r = tl.el.getBoundingClientRect();
+    const r0 = tl.el.getBoundingClientRect(), top = Math.max(r0.top, clipTop), bot = Math.min(r0.bottom, clipBot);
+    const r = { left: r0.left, width: r0.width, top, height: Math.max(0, bot - top) };
     const nOn = tl.el.classList.contains("off") ? 0 : BodyMovin.handsOver({ x: r.left * k, y: r.top * k, w: r.width * k, h: r.height * k }, W, H);
-    const over = nOn >= (BodyMovin.mouse || BodyMovin.simulating ? 1 : 2);
-    const fill = BodyMovin.dwell(tl.g.id, over, now, 2e3);
+    const over = nOn >= (BodyMovin.mouse || BodyMovin.simulating || window.BP_PHONEUI ? 1 : 2);
+    const fill = BodyMovin.dwell(tl.g.id, over, now, window.BP_PHONEUI ? 1200 : 2e3);
     tl.el.classList.toggle("hot", over);
     tl.el.querySelector(".fill").style.width = "".concat(Math.round(fill * 100), "%");
     if (fill === 1) location.href = tl.el.href;
@@ -495,6 +553,12 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
+document.getElementById("changePlay").onclick = () => {
+  try {
+    window.webkit.messageHandlers.bm.postMessage("change");
+  } catch (_) {
+  }
+};
 window.__hub = { tiles, GAMES, cast: window.BP_CAST || null, get page() {
   return page;
 }, get pages() {

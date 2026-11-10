@@ -1,4 +1,19 @@
 (function() {
+  try {
+    if (typeof location === "undefined") return;
+    if (/[?&]app=1(&|$)/.test(location.search)) sessionStorage.bp_phoneui = "1";
+    if (/[?&]tv=1(&|$)/.test(location.search)) sessionStorage.removeItem("bp_phoneui");
+    window.BP_PHONEUI = sessionStorage.bp_phoneui === "1";
+    if (window.BP_PHONEUI) {
+      document.documentElement.classList.add("bp-phone");
+      const st = document.createElement("style");
+      st.textContent = "html.bp-phone #bp-home,html.bp-phone #bpHome,html.bp-phone body > #home{font-size:20px!important;min-height:52px!important;min-width:112px!important;padding:0 18px!important;border-radius:999px!important;font-weight:800!important}";
+      (document.head || document.documentElement).appendChild(st);
+    }
+  } catch (_) {
+  }
+})();
+(function() {
   if (typeof window !== "undefined" && window.BP_TV === void 0) {
     let on = null;
     const q = new URLSearchParams(location.search);
@@ -64,6 +79,12 @@
   const PTR = Object.assign({ minCut: 1.2, beta: 6, dCut: 1.5 }, typeof window !== "undefined" && window.BP_PTR || {});
   const lagSamples = [];
   function feed(m) {
+    if (typeof window !== "undefined" && window.__poseHook) {
+      try {
+        m = window.__poseHook(m) || m;
+      } catch (_) {
+      }
+    }
     if (m && m.t > 1e9) {
       const lag = Date.now() - m.t * 1e3;
       if (lag > -50 && lag < 3e3) {
@@ -296,7 +317,7 @@
     BP._rcMax = t + ms + 3e3;
   };
   const PAGE = typeof location !== "undefined" ? (location.pathname.split("/").pop() || "").replace(/\.html$/, "") : "";
-  const PAUSE_HOLD = { walls: 3.5, keeper: 3, airband: 3, posematch: 3, gallery: 3, starjumps: 3, track: 3, blaster: 3, breaker: 4 };
+  const PAUSE_HOLD = { walls: 3.5, keeper: 3, airband: 3, posematch: 3, gallery: 3, starjumps: 3, track: 3, blaster: 3, breaker: 4, fruit: 3, balloon: 3, bubbles: 3, runner: 3, moles: 3 };
   BP.handMode = "mirror";
   BP.needs = "upper";
   let lastNow = 0, stillFor = 0;
@@ -337,6 +358,7 @@
     const s = window.__game && window.__game.state;
     return s ? START_STATES.test(String(s)) : !!startButton();
   }
+  BP._dbgStart = () => ({ startable: armsStartable(), lock: !!BP._armsStartLock, up: !!(BP.body && BP.body.armsUp), present: BP.present, legs: BP.legsSeen, framing: BP.framing || "" });
   function pressStart() {
     const s = window.__game && window.__game.state;
     if (s && START_STATES.test(String(s))) {
@@ -701,7 +723,7 @@
       const v = BP.vis, whole = !v || ((_f = v.lHip) != null ? _f : 1) > 0.5 && ((_g = v.rHip) != null ? _g : 1) > 0.5 && ((_h = v.lKnee) != null ? _h : 1) > 0.4 && ((_i = v.rKnee) != null ? _i : 1) > 0.4;
       BP.wholeBody = whole;
       if (!BP.ready) {
-        BP.checkIn = bd.armsUp && whole && BP.present !== false ? Math.min(1, (BP.checkIn || 0) + dt / 0.7) : Math.max(0, (BP.checkIn || 0) - dt * 2);
+        BP.checkIn = (bd.armsUp || typeof window !== "undefined" && window.BP_PHONEUI) && whole && BP.present !== false ? Math.min(1, (BP.checkIn || 0) + dt / 0.7) : Math.max(0, (BP.checkIn || 0) - dt * 2);
         if (BP.checkIn >= 1) {
           BP.ready = true;
           BP.readyAt = now;
@@ -845,6 +867,10 @@
     else if (id === "bp-music" && BP._mode === "play") ms = 1200;
     else if (PM_LEAVE.test(id)) ms = 1400;
     else if (SYS_IDS.test(id)) ms = LEAVE_IDS.test(id) && BP.inPlay && !BP.paused && !BP.warmingUp && !armsStartable() ? 1400 : Math.min(ms, 800);
+    if (typeof window !== "undefined" && window.BP_PHONEUI && LEAVE_IDS.test(id) && !BP.mouse) {
+      if (BP.inPlay && !BP.paused && !armsStartable()) return 0;
+      ms = 2e3;
+    }
     if (/home|leave/i.test(id) && !SYS_IDS.test(id) && BP._lastRect && (BP._lastRect.y > 0.25 || BP._lastRect.x > 0.4)) {
       BP._gameHomeAt = performance.now();
       BP._gameHomeTick = BP._modeTick || 0;
@@ -1783,7 +1809,7 @@
     const overUI = BP.howTo && BP.howTo.visible || !!document.getElementById("bphs");
     const hipsSeen = ((_g = vv.lHip) != null ? _g : 1) > 0.6 && ((_h = vv.rHip) != null ? _h : 1) > 0.6;
     const menuFig = !cfg && isGamePage && menuMode() && BP.menuFigure === true;
-    const show = (cfg || menuFig) && BP.live && !sim && J.root && J.lShoulder && J.rShoulder && selfOkT > 0.5 && hipsSeen && !(menuMode() && isGamePage && (overUI || BP.menuFigure !== true));
+    const show = (cfg || menuFig) && BP.live && !sim && J.root && J.lShoulder && J.rShoulder && selfOkT > 0.5 && hipsSeen && !(menuMode() && isGamePage && !(window.BP_PHONEUI && cfg && !document.getElementById("bphs")) && (overUI || BP.menuFigure !== true));
     selfA += ((show ? 1 : 0) - selfA) * Math.min(1, dt * 4);
     clearIfDrawn(ctx, W, H);
     const big = BP.handMode !== "box";
@@ -1982,6 +2008,13 @@
   }
   let prCv = null;
   function noticeText(kind) {
+    if (typeof window !== "undefined" && window.BP_PHONEUI) {
+      if (kind === "away") return "Step into view";
+      if (kind === "close") return "Walk back a little";
+      if (kind === "checkin") return BP.wholeBody === false ? "Walk back so I see you" : "Hands up to start";
+      if (kind === "starting") return "Starting";
+      return "I see you!";
+    }
     if (kind === "away") return BP.inPlay ? "Step into view" : BP.needs === "full" && BP.legsSeen === false ? "Step back so I can see your feet" : "Step into view";
     if (kind === "close") return "Step back a little";
     if (kind === "checkin") return BP.wholeBody === false ? "Step back so I can see all of you" : "Raise both hands to start";
@@ -2016,10 +2049,12 @@
     }
     const msg = noticeText(kind), ring = kind === "checkin" ? BP.checkIn || 0 : kind === "starting" ? BP.armsStart || 0 : null;
     const col = kind === "seen" ? "#7dff9a" : kind === "starting" ? "#ffffff" : "#ffd36b";
-    const fs = Math.max(13 * dpr, Math.min(W, H) * 0.024);
+    const fs = typeof window !== "undefined" && window.BP_PHONEUI ? Math.max(22 * dpr, Math.min(W, H) * 0.05) : Math.max(13 * dpr, Math.min(W, H) * 0.024);
     c.font = "800 ".concat(fs, "px -apple-system, system-ui, sans-serif");
     const ic = fs * 1.05, tw = c.measureText(msg).width, ph = fs * 1.75, pw = tw + ic + fs * 1.6;
-    const y0 = Math.max(3 * dpr, (BP.inPlay ? (_a = BP.noticeTop) != null ? _a : W < H ? 0.19 : 0.105 : 6e-3) * H), x0 = W / 2 - pw / 2;
+    let y0 = Math.max(3 * dpr, (BP.inPlay ? (_a = BP.noticeTop) != null ? _a : W < H ? 0.19 : 0.105 : 6e-3) * H);
+    const x0 = W / 2 - pw / 2;
+    if (typeof window !== "undefined" && window.BP_PHONEUI) y0 = Math.max(y0, 76 * dpr);
     c.save();
     c.globalAlpha = PRm.a;
     c.fillStyle = "rgba(10,12,24,0.72)";
@@ -2314,10 +2349,15 @@
           clearInterval(fade);
         }
       }, 50);
+      setTimeout(() => {
+        old.pause();
+        clearInterval(fade);
+      }, 1800);
     }
     track = new Audio("".concat(typeof BP_DIR !== "undefined" ? BP_DIR : "", "assets/music/").concat(name, ".mp3"));
     track.loop = true;
     track.volume = 0;
+    track.muted = !!BP.musicOff;
     track.dataset.name = name;
     track.dataset.vol = volume;
     setTimeout(showMusicBtn, 0);
@@ -2415,7 +2455,10 @@
     CAM.img.src = "data:image/jpeg;base64," + m.jpg;
   };
   BP.musicVolume = (v) => {
-    if (track) track.volume = v * (BP.musicOff ? 0 : 1);
+    if (track) {
+      track.volume = v * (BP.musicOff ? 0 : 1);
+      track.muted = BP.musicOff || v <= 0;
+    }
   };
   BP.musicOff = (() => {
     try {
@@ -2436,7 +2479,10 @@
       localStorage.bp_music_off = off ? "1" : "0";
     } catch (_) {
     }
-    if (track) track.volume = off ? 0 : +track.dataset.vol || 0.32;
+    if (track) {
+      track.volume = off ? 0 : +track.dataset.vol || 0.32;
+      track.muted = !!off;
+    }
     BP._musicHooks.forEach((fn) => {
       try {
         fn(BP.musicOff);
@@ -2490,6 +2536,50 @@
     }
   };
   const isGame = typeof location !== "undefined" && !/\/(index|phone|lab|join)\.html$|\/$/.test(location.pathname);
+  if (typeof document !== "undefined") {
+    const away = (hidden) => {
+      if (hidden) {
+        if (isGame) BP.setPaused(true);
+        ACS.forEach((c) => {
+          try {
+            c.suspend();
+          } catch (_) {
+          }
+        });
+        if (track) {
+          try {
+            track.pause();
+          } catch (_) {
+          }
+        }
+        document.querySelectorAll("audio").forEach((m) => {
+          try {
+            m.pause();
+          } catch (_) {
+          }
+        });
+      } else if (!BP.paused) {
+        ACS.forEach((c) => {
+          try {
+            c.resume();
+          } catch (_) {
+          }
+        });
+        if (track) {
+          try {
+            track.play().catch(() => {
+            });
+          } catch (_) {
+          }
+        }
+      }
+    };
+    document.addEventListener("visibilitychange", () => away(document.visibilityState === "hidden"));
+    addEventListener("pagehide", () => away(true));
+    addEventListener("pageshow", (e) => {
+      if (e.persisted) away(false);
+    });
+  }
   if (typeof document !== "undefined" && isGame) {
     if (!document.getElementById("bp-sys-css")) {
       const st = document.createElement("style");
