@@ -40,6 +40,9 @@
   const qsRoom = new URLSearchParams(location.search).get("room");
   if (qsRoom) localStorage.bp_room = qsRoom.toUpperCase();
   const ROOM = localStorage.bp_room || "";
+  const qsKey = new URLSearchParams(location.search).get("k");
+  if (qsKey) localStorage.bp_key = qsKey;
+  const KEY = localStorage.bp_key || "";
   const WS_URL = FROM_PHONE ? "ws://".concat(location.hostname, ":8081") : ONLINE ? "".concat(location.protocol === "https:" ? "wss" : "ws", "://").concat(location.host, "/play/relay?room=").concat(ROOM, "&role=tv") : "ws://localhost:8794";
   const DEMO = new URLSearchParams(location.search).has("demo");
   const HOSTED = (() => {
@@ -2216,7 +2219,13 @@
       let pc = null, pcId = null;
       BP._ws = ws;
       ws.onopen = () => {
-        if (FROM_PHONE) ws.send(JSON.stringify({ type: "hello", video: !!BP.wantVideo }));
+        if (FROM_PHONE) ws.send(JSON.stringify({
+          type: "hello",
+          video: !!BP.wantVideo,
+          room: ROOM,
+          k: KEY
+          /* the phone only streams to its own TV pages */
+        }));
         if (ONLINE) {
           ws.send(JSON.stringify({ type: "tv-claim", id: TV_ID }));
           ws.send(JSON.stringify({ type: "rtc-hello", video: !!BP.wantVideo, recAll: !!BP.recordAll }));

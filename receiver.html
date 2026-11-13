@@ -14,6 +14,13 @@
        phone -> TV  {"type":"thumb","jpg":base64}   one small camera picture for the game's corner box
        TV -> phone  {"type":"hello","video":bool}   the game on screen, and whether it shows the camera picture
        TV -> phone  {"ok":true,"room":"ABCD"}       answer to a room message
+     STREAM MODE (11/12, {"room":"ABCD","stream":true}): the phone runs the game and this page only shows its live video
+     (Chromecast chips are too slow for the 3D game). WebRTC from the phone's hidden sender page on the home Wi-Fi, host
+     candidates only, no STUN/TURN; the offer/answer/candidates ride this Cast channel (this https page can't open the
+     phone's ws://). Same messages as the phone's view.html:
+       TV -> phone  {"type":"rtc","want":true} / {"type":"rtc","answer":sdp} / {"type":"rtc","cand":..,"mid":..,"idx":..}
+       phone -> TV  {"type":"rtc","offer":sdp} / {"type":"rtc","cand":..} / {"type":"rtc","restart":true}
+       TV -> phone  {"type":"speed","mode":"phone"|"tv",...}  "tv" = no video came: this page runs the game itself
      WHY AN IFRAME: the game moves between pages (home -> bowling.html -> home); if this document navigated away the
      Cast SDK and the sender channel would go with it. Frames go into the iframe with postMessage (body.js CAST FEED). -->
 <style>
@@ -24,11 +31,14 @@
   #splash p { margin-top: 3vmin; font-size: 3vmin; color: #ffffffb0; }
   #game { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0; display: none; background: #05040b; }
   body.on #game { display: block; } body.on #splash { display: none; }
+  #v { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; background: #000; display: none; }
+  body.video #v { display: block; } body.video #splash, body.video #game { display: none; }
 </style>
 </head>
 <body>
 <div id="splash"><h1>BODY <b>MOVIN'</b></h1><p id="msg">Getting ready… keep your phone open on Body Movin'</p></div>
 <iframe id="game" allow="autoplay; fullscreen" title="Body Movin'"></iframe>
+<video id="v" autoplay muted playsinline></video>
 <script>window.BP_TV = true; try { sessionStorage.bp_tv = '1'; } catch (e) {}</script>
 <script src="https://www.gstatic.com/cast/sdk/libs/caf_receiver/v3/cast_receiver_framework.js"></script>
 <script>
@@ -38,13 +48,14 @@
   var ROOM_OK = /^[A-Z0-9]{4}$/;
   var frame = document.getElementById('game');
   var room = null, ctx = null, hello = null, frames = 0;
-  var st = window.__cast = { room: null, sdk: false, frames: 0, hello: null };
+  var st = window.__cast = { room: null, sdk: false, frames: 0, hello: null, stream: false, via: '', dbg: [] };
   function parse(d) { if (typeof d === 'string') { try { return JSON.parse(d); } catch (e) { return null; } } return d; }
   function roomFrom(d) { var r = d && typeof d.room === 'string' ? d.room.trim().toUpperCase() : ''; return ROOM_OK.test(r) ? r : null; }
   function toGame(m) { try { frame.contentWindow.postMessage(m, location.origin); } catch (e) {} }
   function toPhone(m, senderId) { if (!ctx) return; try { ctx.sendCustomMessage(NS, senderId, m); } catch (e) {} }
   function openRoom(r) {
     if (!r) return false;
+    if (streaming) { room = st.room = r; return true; }     // stream mode: the phone draws, no game here
     if (r !== room) {
       room = st.room = r;
       frame.src = 'index.html?room=' + r + '&cast=1&tvmode=1&castfeed=1';
@@ -56,7 +67,10 @@
     d = parse(d); if (!d || typeof d !== 'object') return;
     if (d.b && typeof d.b === 'object') { frames++; st.frames = frames; toGame(d.b); return; }
     if (d.type === 'thumb') { toGame(d); return; }
+    if (d.type === 'rtc') { onRtc(d); return; }
     if ('room' in d) {
+      if (d.stream === true && roomFrom(d)) startStreamMode(senderId, d.s);
+      else if (roomFrom(d) && streaming) { leaveStream(); room = null; }   // re-cast with TV picked: this page runs the game
       var ok = openRoom(roomFrom(d));
       toPhone(ok ? { ok: true, room: room } : { ok: false, error: 'bad room' }, senderId);
       if (ok && hello) toPhone(hello, senderId);
@@ -68,6 +82,96 @@
     var m = e.data;
     if (m && m.type === 'hello') { hello = st.hello = { type: 'hello', video: !!m.video }; toPhone(hello, undefined); }
   });
+  // ---- STREAM MODE: the phone's live picture (same steps as the phone's view.html) ----
+  var streaming = false, streamSender, pc = null, early = [], gotVideo = false, rtcFails = 0, fallbackTimer = 0;
+  var video = document.getElementById('v');
+  function note(t) { if (st.dbg.length < 40) st.dbg.push(Math.round(performance.now()) + ' ' + t); }
+  function toPhoneStream(m) { toPhone(m, streamSender); }
+  var streamSession = null;
+  function startStreamMode(senderId, s) {
+    if (senderId) streamSender = senderId;
+    var fresh = s !== streamSession; streamSession = s;     // the phone sends each session's room message 3 times
+    if (gotVideo === null) {                               // gave up earlier and runs the game: say so to a new session
+      if (fresh) toPhoneStream({ type: 'speed', mode: 'tv', why: 'picked', fps: -1, screen: 'chromecast' });
+      return;
+    }
+    if (streaming) { if (fresh) { rtcFails = 0; want(); armFallback(); } return; }   // a re-cast: the new session's video
+    streaming = st.stream = true;
+    if (frame.getAttribute('src')) { frame.src = 'about:blank'; room = null; document.body.classList.remove('on'); }   // a TV-run game from an earlier cast stops
+    if (!window.RTCPeerConnection) { note('no webrtc'); runHere(); return; }
+    document.getElementById('msg').textContent = 'Your phone is running the game… the picture starts in a moment';
+    toPhoneStream({ type: 'speed', mode: 'phone', why: 'picked', fps: -1, screen: 'chromecast' });
+    want(); armFallback();
+  }
+  // no video in 12 s (or 3 failed connections in a row): this page runs the game itself, the phone sends body frames
+  function armFallback() {
+    clearTimeout(fallbackTimer);
+    var has = 'webkitDecodedFrameCount' in video, seen = has ? video.webkitDecodedFrameCount : 0;   // frozen video counts as none
+    fallbackTimer = setTimeout(function () { if (!gotVideo || (has && video.webkitDecodedFrameCount === seen)) { note('no video in 12 s'); runHere(); } }, 12000);
+  }
+  function leaveStream() {
+    clearTimeout(fallbackTimer);
+    if (pc) { try { pc.close(); } catch (e) {} pc = null; }
+    streaming = st.stream = false; gotVideo = false; rtcFails = 0; st.via = '';
+    try { video.srcObject = null; } catch (e) {}
+    document.body.classList.remove('video');
+  }
+  function want() { if (streaming) toPhoneStream({ type: 'rtc', want: true }); }
+  function runHere() {
+    if (!streaming) return;
+    clearTimeout(fallbackTimer);
+    if (pc) { try { pc.close(); } catch (e) {} pc = null; }
+    toPhoneStream({ type: 'rtc', bye: true });
+    toPhoneStream({ type: 'speed', mode: 'tv', why: 'picked', fps: -1, screen: 'chromecast' });
+    streaming = st.stream = false; gotVideo = null; st.via = 'game';
+    document.body.classList.remove('video');
+    var r = room; room = null; openRoom(r);
+  }
+  function onRtc(m) {
+    if (!streaming) return;
+    if (m.nortc) { note('phone: no webrtc'); runHere(); return; }
+    if (m.restart) { want(); armFallback(); return; }
+    if (m.offer) {
+      if (pc) { try { pc.close(); } catch (e) {} }
+      early = [];
+      var my = new RTCPeerConnection({ iceServers: [] });
+      pc = my;
+      my.onicecandidate = function (e) { if (e.candidate && pc === my) toPhoneStream({ type: 'rtc', cand: e.candidate.candidate, mid: e.candidate.sdpMid, idx: e.candidate.sdpMLineIndex }); };
+      my.ontrack = function (e) {
+        if (pc !== my) return;
+        var s = (e.streams && e.streams[0]) || new MediaStream([e.track]);
+        try { if ('playoutDelayHint' in e.receiver) e.receiver.playoutDelayHint = 0; } catch (x) {}
+        video.srcObject = s; var pl = video.play(); if (pl && pl.catch) pl.catch(function () {});
+      };
+      my.onconnectionstatechange = function () {
+        if (pc !== my) return;
+        note('pc ' + my.connectionState);
+        if (my.connectionState === 'connected') rtcFails = 0;
+        if (my.connectionState === 'failed') {
+          my.close(); pc = null; rtcFails++;
+          if (rtcFails >= 3) { note('webrtc failed 3 times'); runHere(); } else { setTimeout(want, 800); armFallback(); }
+        }
+      };
+      my.setRemoteDescription({ type: 'offer', sdp: m.offer }).then(function () {
+          for (var i = 0; i < early.length; i++) my.addIceCandidate(early[i]).catch(function () {});
+          early = [];
+          return my.createAnswer();
+        })
+        .then(function (a) { return my.setLocalDescription(a); })
+        .then(function () { if (pc === my) toPhoneStream({ type: 'rtc', answer: my.localDescription.sdp }); })
+        .catch(function (err) { if (pc !== my) return; note('sdp error ' + String(err)); toPhoneStream({ type: 'rtc', error: String(err) }); runHere(); });
+    } else if (m.cand) {
+      var ci = { candidate: m.cand, sdpMid: m.mid, sdpMLineIndex: m.idx };
+      if (pc && pc.remoteDescription) pc.addIceCandidate(ci).catch(function () {}); else if (early.length < 50) early.push(ci);
+    }
+  }
+  video.addEventListener('playing', function () {
+    if (!streaming) return;
+    if (!gotVideo) note('video playing ' + video.videoWidth + 'x' + video.videoHeight);
+    gotVideo = true; clearTimeout(fallbackTimer); st.via = 'video';
+    document.body.classList.add('video');
+  });
+
   window.__castTest = { onPhone: onPhone };   // the headless test drives the same function the Cast channel calls
   // manual / test: receiver.html?room=ABCD opens straight away
   openRoom(roomFrom({ room: new URLSearchParams(location.search).get('room') || '' }));
@@ -78,7 +182,9 @@
     var pm = ctx.getPlayerManager && ctx.getPlayerManager();
     if (pm && cast.framework.messages) {
       pm.setMessageInterceptor(cast.framework.messages.MessageType.LOAD, function (req) {
-        var r = roomFrom(parse(req && req.customData)) || roomFrom(parse(req && req.media && req.media.customData));
+        var cd = parse(req && req.customData) || parse(req && req.media && req.media.customData);
+        var r = roomFrom(cd);
+        if (r && cd && cd.stream === true) startStreamMode(undefined, cd.s);
         openRoom(r);
         var M = cast.framework.messages;   // nothing to play: answer so the sender never waits (the game is open)
         return new M.ErrorData(r ? M.ErrorType.LOAD_CANCELLED : M.ErrorType.LOAD_FAILED);

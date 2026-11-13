@@ -1,0 +1,430 @@
+<!doctype html>
+<html>
+<head>
+<script src="_lg/polyfills.js"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Body Movin'</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #05040b; color: #fff; font-family: -apple-system, system-ui, 'Segoe UI', sans-serif; overflow: hidden; }
+  #v, #img { position: absolute; left: 0; top: 0; width: 100%; height: 100%; object-fit: contain; background: #000; display: none; }
+  #bench { position: absolute; left: 0; top: 0; width: 100%; height: 100%; opacity: 0.25; }
+  #msg { position: absolute; left: 5%; right: 5%; top: 42%; text-align: center; font-size: 4.2vh; font-weight: 800; line-height: 1.3; }
+  #msg small { display: block; font-size: 2.4vh; font-weight: 500; color: #ffffffb0; margin-top: 1.2vh; }
+  #stats { position: absolute; right: 1vw; bottom: 1vh; font: 2.2vh monospace; color: #9dffd0; background: #000a; padding: .4vh .8vw; display: none; white-space: pre; }
+</style>
+</head>
+<body>
+<canvas id="bench"></canvas>
+<video id="v" autoplay muted playsinline></video>
+<img id="img" alt="">
+<div id="msg">Connecting to your phone…</div>
+<div id="stats"></div>
+<script>(function() {
+  "use strict";
+  var FAST_FPS = 48;
+  function qp(name) {
+    var m = new RegExp("[?&]" + name + "=([^&#]*)").exec(location.search);
+    return m ? decodeURIComponent(m[1].replace(/\+/g, " ")) : "";
+  }
+  var room = qp("room"), key = qp("k"), clock = qp("clock") === "1", showStats = clock || qp("stats") === "1";
+  var msg = document.getElementById("msg"), video = document.getElementById("v"), img = document.getElementById("img");
+  var stats = document.getElementById("stats");
+  if (showStats) stats.style.display = "block";
+  function say(a, b) {
+    msg.innerHTML = "";
+    msg.appendChild(document.createTextNode(a));
+    if (b) {
+      var s = document.createElement("small");
+      s.appendChild(document.createTextNode(b));
+      msg.appendChild(s);
+    }
+    msg.style.display = "block";
+  }
+  var devId = "";
+  try {
+    devId = localStorage.getItem("bmScreenId") || "";
+    if (!devId) {
+      devId = String(Math.random()).slice(2, 14) + String(Date.now() % 1e5);
+      localStorage.setItem("bmScreenId", devId);
+    }
+  } catch (e) {
+  }
+  function gameURL() {
+    return "/?room=" + encodeURIComponent(room) + "&cast=1&k=" + encodeURIComponent(key);
+  }
+  var ws = null, decided = false, mode = "", wsTries = 0, badKey = false, lastSpeed = null;
+  function report(o) {
+    lastSpeed = o;
+    send(o);
+  }
+  function send(o) {
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify(o));
+  }
+  function connect() {
+    try {
+      ws = new WebSocket("ws://" + location.hostname + ":8081");
+    } catch (e) {
+      setTimeout(connect, 1500);
+      return;
+    }
+    ws.binaryType = "arraybuffer";
+    ws.onopen = function() {
+      wsTries = 0;
+      send({ type: "hello", k: key, room, view: true, screen: devId });
+      if (lastSpeed) send(lastSpeed);
+      if (mode === "phone") startStream();
+      else if (!decided) setTimeout(function() {
+        if (!decided && !badKey) decide("auto");
+      }, 2500);
+    };
+    ws.onmessage = function(e) {
+      if (typeof e.data !== "string") {
+        onJpeg(e.data);
+        return;
+      }
+      var m;
+      try {
+        m = JSON.parse(e.data);
+      } catch (x) {
+        return;
+      }
+      if (m.type === "badkey") {
+        badKey = true;
+        decided = true;
+        say("Cast again from your phone", "This link is from an earlier time the app was open");
+        try {
+          ws.close();
+        } catch (x) {
+        }
+        return;
+      }
+      if (m.type === "run" && typeof m.fast === "number") FAST_FPS = m.fast;
+      if (m.type === "run" && !decided) decide(m.run, m.why);
+      else if (m.type === "rtc") onRtc(m);
+    };
+    ws.onclose = function() {
+      ws = null;
+      if (badKey) return;
+      wsTries++;
+      setTimeout(connect, Math.min(4e3, 500 * wsTries));
+    };
+  }
+  function decide(run, why) {
+    decided = true;
+    why = why === "remembered" ? "remembered" : "picked";
+    if (run === "tv") {
+      goTV(-1, "", why);
+      return;
+    }
+    if (run === "phone") {
+      useStream(-1, "", why);
+      return;
+    }
+    say("Checking how fast this screen is…", "Just a moment");
+    bench(function(fps, renderer) {
+      if (fps >= FAST_FPS) goTV(fps, renderer, "measured");
+      else useStream(fps, renderer, "measured");
+    });
+  }
+  function goTV(fps, renderer, why) {
+    mode = "tv";
+    report({ type: "speed", fps, renderer, mode: "tv", why, screen: devId });
+    say("This screen is fast. Starting the game…");
+    setTimeout(function() {
+      location.replace(gameURL());
+    }, 300);
+  }
+  function useStream(fps, renderer, why) {
+    mode = "phone";
+    report({ type: "speed", fps, renderer, mode: "phone", why, screen: devId });
+    say("Your phone is running the game", "The picture starts in a moment");
+    startStream();
+  }
+  function bench(done) {
+    var c = document.getElementById("bench"), dpr = window.devicePixelRatio || 1;
+    c.width = Math.round(c.clientWidth * dpr);
+    c.height = Math.round(c.clientHeight * dpr);
+    var gl = null;
+    try {
+      gl = c.getContext("webgl", { antialias: true }) || c.getContext("experimental-webgl");
+    } catch (e) {
+    }
+    if (!gl) {
+      done(0, "no WebGL");
+      return;
+    }
+    var renderer = "";
+    try {
+      var dbg2 = gl.getExtension("WEBGL_debug_renderer_info");
+      renderer = String(dbg2 ? gl.getParameter(dbg2.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
+    } catch (e) {
+    }
+    function sh(type, src) {
+      var s = gl.createShader(type);
+      gl.shaderSource(s, src);
+      gl.compileShader(s);
+      return s;
+    }
+    var p = gl.createProgram();
+    gl.attachShader(p, sh(gl.VERTEX_SHADER, "attribute vec3 a;attribute vec3 n;uniform float t;varying vec3 vn;varying vec3 vp;void main(){float c=cos(t),s=sin(t);vec3 q=vec3(c*a.x+s*a.z,a.y,-s*a.x+c*a.z);vn=vec3(c*n.x+s*n.z,n.y,-s*n.x+c*n.z);vp=q;gl_Position=vec4(q.x*0.9,q.y*0.9,q.z*0.1+0.5,1.0);}"));
+    gl.attachShader(p, sh(gl.FRAGMENT_SHADER, "precision mediump float;varying vec3 vn;varying vec3 vp;uniform float t;void main(){vec3 n=normalize(vn);vec3 col=vec3(0.0);for(int i=0;i<6;i++){float fi=float(i);vec3 l=normalize(vec3(sin(t+fi),0.6,cos(t*0.7+fi)));vec3 h=normalize(l+vec3(0.0,0.0,1.0));col+=vec3(0.5+0.08*fi,0.4,0.9-0.1*fi)*max(dot(n,l),0.0)*0.25+pow(max(dot(n,h),0.0),32.0)*0.15;}gl_FragColor=vec4(col+0.05*sin(vp*20.0),1.0);}"));
+    gl.linkProgram(p);
+    gl.useProgram(p);
+    var N = 40, verts = [], F = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+    for (var i = 0; i < N; i++) for (var j = 0; j < N; j++) {
+      var cx = i / (N - 1) * 2 - 1, cy = j / (N - 1) * 2 - 1, cz = Math.sin(i * 0.7 + j * 0.3) * 0.5, r = 0.022;
+      for (var f = 0; f < 6; f++) {
+        var nn = F[f], u = nn[0] ? [0, 1, 0] : [1, 0, 0], w = [nn[1] * u[2] - nn[2] * u[1], nn[2] * u[0] - nn[0] * u[2], nn[0] * u[1] - nn[1] * u[0]];
+        var pts = [[-1, -1], [1, -1], [1, 1], [-1, -1], [1, 1], [-1, 1]];
+        for (var k = 0; k < 6; k++) {
+          var a = pts[k][0], b = pts[k][1];
+          verts.push(cx + r * (nn[0] + a * u[0] + b * w[0]), cy + r * (nn[1] + a * u[1] + b * w[1]), cz + r * (nn[2] + a * u[2] + b * w[2]), nn[0], nn[1], nn[2]);
+        }
+      }
+    }
+    var buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.STATIC_DRAW);
+    var la = gl.getAttribLocation(p, "a"), ln = gl.getAttribLocation(p, "n"), lt = gl.getUniformLocation(p, "t");
+    gl.enableVertexAttribArray(la);
+    gl.vertexAttribPointer(la, 3, gl.FLOAT, false, 24, 0);
+    gl.enableVertexAttribArray(ln);
+    gl.vertexAttribPointer(ln, 3, gl.FLOAT, false, 24, 12);
+    gl.enable(gl.DEPTH_TEST);
+    gl.viewport(0, 0, c.width, c.height);
+    var count = verts.length / 6, t0 = 0, frames = 0, WARM = 500, RUN = 2500;
+    function frame(now) {
+      if (!t0) t0 = now;
+      var el = now - t0;
+      gl.clearColor(0.02, 0.02, 0.06, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      gl.uniform1f(lt, el / 1e3);
+      for (var pass = 0; pass < 3; pass++) gl.drawArrays(gl.TRIANGLES, 0, count);
+      if (el > WARM) frames++;
+      if (el < WARM + RUN) {
+        requestAnimationFrame(frame);
+        return;
+      }
+      var fps = Math.round(frames / (RUN / 1e3) * 10) / 10;
+      c.style.display = "none";
+      try {
+        gl.deleteBuffer(buf);
+        var lose = gl.getExtension("WEBGL_lose_context");
+        if (lose) lose.loseContext();
+      } catch (e) {
+      }
+      done(fps, renderer);
+    }
+    requestAnimationFrame(frame);
+  }
+  var early = [];
+  var pc = null, rtcFails = 0, gotVideo = false, jpegOn = false, fallbackTimer = 0, dbg = [];
+  function note(t) {
+    if (dbg.length < 30) dbg.push(Math.round(performance.now()) + " " + t);
+  }
+  function startStream() {
+    if (!ws || ws.readyState !== 1) return;
+    if (window.RTCPeerConnection && !jpegOn && qp("via") !== "jpeg") {
+      send({ type: "rtc", want: true });
+      if (!fallbackTimer) fallbackTimer = setTimeout(function() {
+        if (!gotVideo) {
+          note("no video in 8 s: jpeg");
+          useJpeg();
+        }
+      }, 8e3);
+    } else useJpeg();
+  }
+  function useJpeg() {
+    if (pc) {
+      try {
+        pc.close();
+      } catch (e) {
+      }
+      pc = null;
+    }
+    if (!jpegOn) send({ type: "rtc", bye: true });
+    jpegOn = true;
+    send({ type: "frames", on: true });
+  }
+  function onRtc(m) {
+    if (jpegOn) return;
+    if (m.nortc) {
+      note("phone: no webrtc");
+      useJpeg();
+      return;
+    }
+    if (m.offer) {
+      if (pc) {
+        try {
+          pc.close();
+        } catch (e) {
+        }
+      }
+      early = [];
+      var my = new RTCPeerConnection({ iceServers: [] });
+      pc = my;
+      my.onicecandidate = function(e) {
+        if (e.candidate && pc === my) send({ type: "rtc", cand: e.candidate.candidate, mid: e.candidate.sdpMid, idx: e.candidate.sdpMLineIndex });
+      };
+      my.ontrack = function(e) {
+        if (pc !== my) return;
+        var s = e.streams && e.streams[0] || new MediaStream([e.track]);
+        try {
+          if ("playoutDelayHint" in e.receiver) e.receiver.playoutDelayHint = 0;
+        } catch (x) {
+        }
+        video.srcObject = s;
+        var pl = video.play();
+        if (pl && pl.catch) pl.catch(function() {
+        });
+      };
+      my.oniceconnectionstatechange = function() {
+        if (pc === my) note("ice " + my.iceConnectionState);
+      };
+      my.onconnectionstatechange = function() {
+        if (pc !== my) return;
+        note("pc " + my.connectionState);
+        if (my.connectionState === "failed") {
+          my.close();
+          pc = null;
+          rtcFails++;
+          if (rtcFails >= 3) {
+            note("webrtc failed 3 times: jpeg");
+            useJpeg();
+          } else setTimeout(startStream, 800);
+        }
+      };
+      my.setRemoteDescription({ type: "offer", sdp: m.offer }).then(function() {
+        for (var i = 0; i < early.length; i++) my.addIceCandidate(early[i]).catch(function() {
+        });
+        early = [];
+        return my.createAnswer();
+      }).then(function(a) {
+        return my.setLocalDescription(a);
+      }).then(function() {
+        if (pc === my) send({ type: "rtc", answer: my.localDescription.sdp });
+      }).catch(function(err) {
+        if (pc !== my) return;
+        note("sdp error " + String(err));
+        send({ type: "rtc", error: String(err) });
+        useJpeg();
+      });
+      note("offer " + (/H264/i.test(m.offer) ? "has H264" : "no H264"));
+    } else if (m.cand) {
+      var ci = { candidate: m.cand, sdpMid: m.mid, sdpMLineIndex: m.idx };
+      if (pc && pc.remoteDescription) pc.addIceCandidate(ci).catch(function() {
+      });
+      else if (early.length < 50) early.push(ci);
+    } else if (m.restart) {
+      startStream();
+    }
+  }
+  video.addEventListener("playing", function() {
+    if (!gotVideo) note("video playing " + video.videoWidth + "x" + video.videoHeight);
+    gotVideo = true;
+    msg.style.display = "none";
+    img.style.display = "none";
+    video.style.display = "block";
+    via = "video";
+  });
+  var busy = false, lastUrl = "", via = "";
+  function onJpeg(ab) {
+    if (!jpegOn || busy || ab.byteLength < 16) return;
+    var ts = new DataView(ab, 0, 8).getFloat64(0, true);
+    busy = true;
+    var u = URL.createObjectURL(new Blob([new Uint8Array(ab, 8)], { type: "image/jpeg" }));
+    img.onload = function() {
+      busy = false;
+      if (lastUrl) URL.revokeObjectURL(lastUrl);
+      lastUrl = u;
+      if (img.style.display !== "block") {
+        msg.style.display = "none";
+        video.style.display = "none";
+        img.style.display = "block";
+        via = "jpeg";
+      }
+      if (!clock) tick(Date.now() - ts);
+    };
+    img.onerror = function() {
+      busy = false;
+      URL.revokeObjectURL(u);
+    };
+    img.src = u;
+  }
+  var shown = 0, lat = [], lastClock = 0, rd = null, rdc = null, clockScale = 0;
+  function tick(ms) {
+    shown++;
+    if (ms >= 0) lat.push(ms);
+  }
+  function readClock() {
+    var src = via === "video" ? video : via === "jpeg" ? img : null;
+    if (!src) return;
+    var w = src.videoWidth || src.naturalWidth, h = src.videoHeight || src.naturalHeight;
+    if (!w || !h) return;
+    if (!rd) {
+      rd = document.createElement("canvas");
+      rdc = rd.getContext("2d");
+    }
+    var scales = clockScale ? [clockScale] : [w / 1280, w / 640, w / 1920, w / 2560, w / 960];
+    for (var si = 0; si < scales.length; si++) {
+      var sc = scales[si];
+      rd.width = Math.min(w, Math.ceil(44 * 12 * sc));
+      rd.height = Math.min(h, Math.ceil(12 * sc));
+      rdc.drawImage(src, 0, 0, rd.width, rd.height, 0, 0, rd.width, rd.height);
+      var d = rdc.getImageData(0, 0, rd.width, rd.height).data, v = 0, y = Math.floor(6 * sc);
+      var bit = function(i2) {
+        var x = Math.floor((i2 * 12 + 6) * sc), o = (y * rd.width + x) * 4;
+        return (d[o] + d[o + 1] + d[o + 2]) / 3 > 128 ? 1 : 0;
+      };
+      if (bit(0) !== 1 || bit(1) !== 0) continue;
+      for (var i = 0; i < 42; i++) v = v * 2 + bit(i + 2);
+      if (Math.abs(Date.now() - v) > 6e4) continue;
+      if (!clockScale) {
+        clockScale = sc;
+        note("clock bar found, page " + Math.round(w / sc) + " wide");
+      }
+      if (v !== lastClock) {
+        lastClock = v;
+        tick(Date.now() - v);
+      }
+      return;
+    }
+  }
+  var last = Date.now(), summary = { fps: [], lat: [] };
+  function loop() {
+    if (clock) readClock();
+    var now = Date.now();
+    if (now - last >= 1e3) {
+      var fps = shown;
+      var sorted = lat.slice().sort(function(a, b) {
+        return a - b;
+      }), med = sorted.length ? sorted[sorted.length >> 1] : -1;
+      var dec = -1;
+      if (via === "video" && video.webkitDecodedFrameCount !== void 0) {
+        var dn = video.webkitDecodedFrameCount;
+        dec = dn - (loop.dn || 0);
+        loop.dn = dn;
+      }
+      if (!clock && dec >= 0) fps = dec;
+      if (via) {
+        summary.fps.push(fps);
+        if (med >= 0) summary.lat.push(med);
+        if (dec >= 0) (summary.dec = summary.dec || []).push(dec);
+      }
+      window.__bmView = { via, fps, latency: med, mode, summary, dbg };
+      if (showStats) stats.textContent = (via || mode || "...") + "  " + fps + " fps" + (med >= 0 ? "  " + med + " ms" : "");
+      shown = 0;
+      lat = [];
+      last = now;
+    }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+  window.__bmView = { via: "", fps: 0, latency: -1, mode: "", summary, dbg };
+  if (!key) say("Open this from the Body Movin' app on your phone");
+  else connect();
+})();
+</script>
+</body>
+</html>

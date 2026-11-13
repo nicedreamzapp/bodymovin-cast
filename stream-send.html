@@ -1,0 +1,183 @@
+<!doctype html>
+<html>
+<head>
+<script src="_lg/polyfills.js"></script><meta charset="utf-8"><title>Body Movin' sender</title></head>
+<body style="margin:0;background:#000">
+<canvas id="c" width="1280" height="720"></canvas>
+<script>(function() {
+  const q = new URLSearchParams(location.search);
+  const key = q.get("k") || "", ip = q.get("ip") || "";
+  const c = document.getElementById("c"), g = c.getContext("2d");
+  const stream = c.captureStream(30);
+  const track = stream.getVideoTracks()[0];
+  try {
+    track.contentHint = "motion";
+  } catch (_) {
+  }
+  const peers = /* @__PURE__ */ new Map();
+  let ws = null, busy = false;
+  function send(o) {
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify(o));
+  }
+  function fix(s) {
+    return ip ? s.replace(/[0-9a-f-]{36}\.local/gi, ip) : s;
+  }
+  function fast(sdp) {
+    const lines = sdp.split("\r\n"), out = [];
+    let video = false;
+    const fmtp = new Set(lines.filter((l) => l.startsWith("a=fmtp:")).map((l) => l.slice(7).split(" ")[0]));
+    for (const l of lines) {
+      if (l.startsWith("m=")) video = l.startsWith("m=video");
+      const rt = video && /^a=rtpmap:(\d+) (H264|VP8|VP9)\//i.exec(l);
+      if (video && l.startsWith("a=fmtp:") && !/apt=/.test(l)) {
+        out.push(l + ";x-google-start-bitrate=4000;x-google-min-bitrate=1500");
+        continue;
+      }
+      out.push(l);
+      if (rt && !fmtp.has(rt[1])) out.push("a=fmtp:" + rt[1] + " x-google-start-bitrate=4000;x-google-min-bitrate=1500");
+    }
+    return out.join("\r\n");
+  }
+  function connect() {
+    ws = new WebSocket("ws://localhost:8081");
+    ws.binaryType = "arraybuffer";
+    ws.onopen = () => {
+      send({ type: "hello", k: key, sender: true });
+      feeding = null;
+      feed();
+    };
+    ws.onmessage = (e) => {
+      if (typeof e.data !== "string") {
+        paint(e.data);
+        return;
+      }
+      let m;
+      try {
+        m = JSON.parse(e.data);
+      } catch (_) {
+        return;
+      }
+      if (m.type === "rtc" && m.from != null) onRtc(m);
+      else if (m.type === "gone" && m.from != null) drop(m.from);
+    };
+    ws.onclose = () => {
+      ws = null;
+      setTimeout(connect, 500);
+    };
+  }
+  function paint(ab) {
+    if (busy || ab.byteLength < 16) return;
+    busy = true;
+    createImageBitmap(new Blob([new Uint8Array(ab, 8)], { type: "image/jpeg" })).then((b) => {
+      g.drawImage(b, 0, 0, 1280, 720);
+      b.close && b.close();
+      busy = false;
+    }).catch(() => {
+      busy = false;
+    });
+  }
+  function drop(id) {
+    const p = peers.get(id);
+    if (p) {
+      try {
+        p.close();
+      } catch (_) {
+      }
+      peers.delete(id);
+    }
+    feed();
+  }
+  let feeding = null;
+  function feed() {
+    const on = peers.size > 0;
+    if (on !== feeding && ws && ws.readyState === 1) {
+      feeding = on;
+      send({ type: "frames", on });
+    }
+  }
+  const tries = /* @__PURE__ */ new Map();
+  async function offer(id) {
+    drop(id);
+    const pc = new RTCPeerConnection({ iceServers: [] });
+    peers.set(id, pc);
+    feed();
+    try {
+      await negotiate(id, pc);
+    } catch (err) {
+      err.pc = pc;
+      throw err;
+    }
+  }
+  async function negotiate(id, pc) {
+    const tr = pc.addTransceiver(track, { direction: "sendonly", streams: [stream] });
+    try {
+      const caps = RTCRtpSender.getCapabilities && RTCRtpSender.getCapabilities("video");
+      if (caps && tr.setCodecPreferences) {
+        const h264 = caps.codecs.filter((x) => /h264/i.test(x.mimeType));
+        const rest = caps.codecs.filter((x) => !/h264/i.test(x.mimeType));
+        tr.setCodecPreferences(h264.concat(rest));
+      }
+    } catch (_) {
+    }
+    const held = [];
+    let offered = false;
+    const sendCand = (c2) => send({ type: "rtc", to: id, cand: fix(c2.candidate), mid: c2.sdpMid, idx: c2.sdpMLineIndex });
+    pc.onicecandidate = (e) => {
+      if (!e.candidate || peers.get(id) !== pc) return;
+      if (offered) sendCand(e.candidate);
+      else held.push(e.candidate);
+    };
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === "connected") tries.delete(id);
+      if (pc.connectionState === "failed" || pc.connectionState === "closed") {
+        if (peers.get(id) === pc) {
+          peers.delete(id);
+          feed();
+        }
+      }
+    };
+    const o = await pc.createOffer();
+    await pc.setLocalDescription(o);
+    try {
+      const p = tr.sender.getParameters();
+      p.encodings = p.encodings && p.encodings.length ? p.encodings : [{}];
+      p.encodings[0].maxBitrate = 6e6;
+      p.encodings[0].maxFramerate = 30;
+      p.degradationPreference = "maintain-framerate";
+      await tr.sender.setParameters(p);
+    } catch (_) {
+    }
+    if (peers.get(id) !== pc) return;
+    send({ type: "rtc", to: id, offer: fix(pc.localDescription.sdp) });
+    offered = true;
+    held.splice(0).forEach(sendCand);
+  }
+  function onRtc(m) {
+    const id = m.from;
+    if (m.want) {
+      offer(id).catch((err) => {
+        if (err && err.pc && peers.get(id) !== err.pc) return;
+        drop(id);
+        const n = (tries.get(id) || 0) + 1;
+        tries.set(id, n);
+        if (n <= 3) setTimeout(() => send({ type: "rtc", to: id, restart: true, error: String(err) }), 500 * n);
+        else send({ type: "rtc", to: id, nortc: true });
+      });
+      return;
+    }
+    if (m.bye || m.error) {
+      drop(id);
+      return;
+    }
+    const pc = peers.get(id);
+    if (!pc) return;
+    if (m.answer) pc.setRemoteDescription({ type: "answer", sdp: fast(m.answer) }).catch(() => pc.setRemoteDescription({ type: "answer", sdp: m.answer }).catch(() => {
+    }));
+    else if (m.cand) pc.addIceCandidate({ candidate: m.cand, sdpMid: m.mid, sdpMLineIndex: m.idx }).catch(() => {
+    });
+  }
+  connect();
+})();
+</script>
+</body>
+</html>
